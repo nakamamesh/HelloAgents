@@ -25,9 +25,14 @@ class Settings(BaseSettings):
     openrouter_model: str = "deepseek/deepseek-v4-flash"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
-    @field_validator("openrouter_api_key", mode="before")
+    # Control-plane admin + machine JWT (server-side only)
+    admin_api_key: str = "dev-admin-change-me"
+    jwt_secret: str = "dev-jwt-change-me-to-at-least-32-chars"
+    jwt_expires_minutes: int = 60
+
+    @field_validator("openrouter_api_key", "admin_api_key", "jwt_secret", mode="before")
     @classmethod
-    def strip_api_key(cls, value: object) -> object:
+    def strip_secrets(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
 
 

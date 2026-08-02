@@ -15,6 +15,7 @@ dependencies = [
     "httpx>=0.28.0",
     "redis>=5.2.0",
     "python-dotenv>=1.0.0",
+    "pyjwt>=2.9.0",
 ]
 
 [project.optional-dependencies]

@@ -20,6 +20,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base, Money
 
 
+def _pg_enum(enum_cls: type[enum.Enum], name: str) -> Enum:
+    return Enum(
+        enum_cls,
+        name=name,
+        values_callable=lambda members: [m.value for m in members],
+    )
+
+
 class AgentRole(str, enum.Enum):
     SELLER = "seller"
     PUBLISHER = "publisher"
@@ -89,9 +97,9 @@ class Agent(Base):
     slug: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(256))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    role: Mapped[AgentRole] = mapped_column(Enum(AgentRole, name="agent_role"), index=True)
+    role: Mapped[AgentRole] = mapped_column(_pg_enum(AgentRole, "agent_role"), index=True)
     status: Mapped[AgentStatus] = mapped_column(
-        Enum(AgentStatus, name="agent_status"), default=AgentStatus.DRAFT
+        _pg_enum(AgentStatus, "agent_status"), default=AgentStatus.DRAFT
     )
     persona_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("persona_versions.id"), nullable=True
@@ -121,7 +129,7 @@ class Listing(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     price_usdc: Mapped[Decimal] = mapped_column(Money)
     status: Mapped[ListingStatus] = mapped_column(
-        Enum(ListingStatus, name="listing_status"), default=ListingStatus.ACTIVE
+        _pg_enum(ListingStatus, "listing_status"), default=ListingStatus.ACTIVE
     )
     capabilities: Mapped[list] = mapped_column(JSONB, default=list)
     meta: Mapped[dict] = mapped_column(JSONB, default=dict)
@@ -154,7 +162,8 @@ class Transaction(Base):
     referral_usdc: Mapped[Decimal] = mapped_column(Money, default=Decimal("0"))
     seller_net_usdc: Mapped[Decimal] = mapped_column(Money, default=Decimal("0"))
     status: Mapped[TransactionStatus] = mapped_column(
-        Enum(TransactionStatus, name="transaction_status"), default=TransactionStatus.PENDING
+        _pg_enum(TransactionStatus, "transaction_status"),
+        default=TransactionStatus.PENDING,
     )
     checkout_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     meta: Mapped[dict] = mapped_column(JSONB, default=dict)
