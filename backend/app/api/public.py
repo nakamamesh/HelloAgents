@@ -12,11 +12,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.config import get_settings
 from app.models.orm import Agent, AgentRole, AgentStatus, Listing, ListingStatus
 from app.models.fees import mint_referral_code
 from app.services.auth import hash_api_key
 from app.services.fees import DEFAULT_RATES, FeeRates, compute_split
 from app.services.registry import mint_api_key
+from app.services import wallets as wallet_svc
 from app.models.fees import FeeConfig
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -48,6 +50,8 @@ class PublicRegisterResponse(BaseModel):
     role: AgentRole
     join_hint: str
     fees: dict
+    wallet_address: str | None = None
+    wallet_network: str | None = None
 
 
 class FeePreviewRequest(BaseModel):
@@ -150,6 +154,28 @@ async def public_register(
         meta={"skills": body.skills, "public_join": True},
     )
     db.add(agent)
+    await db.flush()
+
+    wallet_address: str | None = None
+    wallet_network: str | None = None
+    try:
+        provisioned = await wallet_svc.provision_evm_account(agent.slug)
+        if provisioned:
+            agent.wallet_id = provisioned.wallet_id
+            agent.wallet_address = provisioned.address
+            agent.meta = {
+                **(agent.meta or {}),
+                "wallet_network": provisioned.network,
+            }
+            wallet_address = provisioned.address
+            wallet_network = provisioned.network
+    except Exception as exc:  # noqa: BLE001
+        if get_settings().cdp_required:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"wallet provision failed: {exc}",
+            ) from exc
+
     await db.commit()
     await db.refresh(agent)
 
@@ -165,6 +191,8 @@ async def public_register(
             "platform_fee_bps": rates.platform_fee_bps,
             "referral_bps": rates.referral_bps,
         },
+        wallet_address=wallet_address,
+        wallet_network=wallet_network,
     )
 
 

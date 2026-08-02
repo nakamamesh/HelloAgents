@@ -36,6 +36,27 @@ async def me(agent: Agent = Depends(get_current_agent)) -> AgentOut:
     return AgentOut.model_validate(agent)
 
 
+@router.get("/wallet")
+async def my_wallet(agent: Agent = Depends(get_current_agent)) -> dict:
+    """CDP wallet id/address + live balances (Base Sepolia until mainnet cutover)."""
+    from app.services import wallets as wallet_svc
+
+    if not agent.wallet_address:
+        return {
+            "wallet_id": agent.wallet_id,
+            "wallet_address": None,
+            "configured": wallet_svc.cdp_configured(),
+            "balances": [],
+            "hint": "No wallet yet — set CDP secrets and POST /ingest/wallets/backfill",
+        }
+    balances = await wallet_svc.list_balances(agent.wallet_address)
+    return {
+        "wallet_id": agent.wallet_id,
+        "wallet_address": agent.wallet_address,
+        **balances,
+    }
+
+
 @router.get("/card")
 async def my_card(
     agent: Agent = Depends(get_current_agent),

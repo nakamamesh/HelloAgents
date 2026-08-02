@@ -10,3 +10,4 @@ Do not post live keys or private keys in public issues.
 ## Scope
 HelloAgents is pre-mainnet. Treat Sepolia and local keys as disposable.
 Do not send mainnet funds until wallets + settlement are production-ready.
+Testnet: Base Sepolia via CDP. Keep `CDP_*` secrets server-side only (Fly secrets / `.env`).

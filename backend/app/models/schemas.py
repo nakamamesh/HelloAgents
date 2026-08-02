@@ -54,6 +54,8 @@ class AgentOut(BaseModel):
     status: AgentStatus
     reputation_score: Decimal
     referral_budget: Decimal
+    wallet_id: str | None = None
+    wallet_address: str | None = None
     created_at: datetime
     updated_at: datetime
 

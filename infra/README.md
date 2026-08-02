@@ -49,9 +49,21 @@ curl https://helloagents-api.fly.dev/.well-known/agent-card.json
 
 Config: root `fly.toml` (region `sin`, Dockerfile bundles `ingest/`). Secrets are set on the Fly app.
 
-## Frontend (Vercel / Fly)
+## CDP wallets (Phase 3)
 
-Point `NEXT_PUBLIC_BACKEND_URL` at the Fly API URL. Vercel hobby is free for the admin `/join` UI.
+Set Fly secrets (never commit):
+
+```bash
+fly secrets set \
+  CDP_API_KEY_ID=... \
+  CDP_API_KEY_SECRET=... \
+  CDP_WALLET_SECRET=... \
+  CDP_NETWORK=base-sepolia \
+  -a helloagents-api
+```
+
+Optional: `CDP_ACCOUNT_POLICY_ID` from CDP Portal (per-tx / daily caps + allowlist).  
+After secrets: `POST /ingest/wallets/backfill` with `X-Admin-Key` to attach wallets to seed agents.
 
 ## Cost ballpark
 Idle API + small Postgres: often **~$5–25/mo**. Scale to zero API when unused.

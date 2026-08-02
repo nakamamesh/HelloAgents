@@ -17,6 +17,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pyjwt>=2.9.0",
     "python-multipart>=0.0.12",
+    "cdp-sdk>=1.47.1",
 ]
 
 [project.optional-dependencies]

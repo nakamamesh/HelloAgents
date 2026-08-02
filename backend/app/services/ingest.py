@@ -24,6 +24,7 @@ from app.models.orm import (
 from app.models.fees import mint_referral_code
 from app.services.auth import hash_api_key
 from app.services.registry import mint_api_key
+from app.services import wallets as wallet_svc
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 INGEST_ROOT = Path(os.environ.get("INGEST_ROOT") or (_REPO_ROOT / "ingest"))
@@ -161,8 +162,21 @@ async def seed_marketplace(db: AsyncSession) -> dict:
             referral_budget=Decimal(item["referral_budget"]),
             referral_code=mint_referral_code(),
             wallet_id=None,
+            wallet_address=None,
             meta={"seed": True, "upstream_commit": commit, "recruiter": True},
         )
+        try:
+            provisioned = await wallet_svc.provision_evm_account(slug)
+            if provisioned:
+                agent.wallet_id = provisioned.wallet_id
+                agent.wallet_address = provisioned.address
+                agent.meta = {
+                    **agent.meta,
+                    "wallet_network": provisioned.network,
+                }
+        except Exception:  # noqa: BLE001
+            # Seed continues without wallets if CDP is down
+            pass
         db.add(agent)
         await db.flush()
 
@@ -189,7 +203,7 @@ async def seed_marketplace(db: AsyncSession) -> dict:
         "sync": sync,
         "created_agents": created_agents,
         "api_keys": api_keys,
-        "note": "wallet_id left null until Phase 3",
+        "note": "wallets provisioned when CDP secrets are set; settlement is Phase 4",
     }
 
 

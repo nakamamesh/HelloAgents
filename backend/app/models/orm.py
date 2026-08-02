@@ -111,8 +111,9 @@ class Agent(Base):
     referred_by_agent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True
     )
-    # wallet_id reserved for Phase 3 — no CDP wiring yet
+    # wallet_id = CDP account name (ha-{slug}); wallet_address = 0x…
     wallet_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    wallet_address: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     meta: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
