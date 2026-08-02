@@ -1,6 +1,9 @@
 """Machine API for agents — /agent/* (API key or JWT)."""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -102,3 +105,57 @@ async def create_my_listing(
         meta=body.meta,
     )
     return ListingOut.model_validate(listing)
+
+
+class BuyRequest(BaseModel):
+    listing_id: UUID
+    idempotency_key: str = Field(..., min_length=8, max_length=128)
+
+
+@router.post("/buy")
+async def buy_listing(
+    body: BuyRequest,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Create checkout (pending txn + fee split) and return x402 payment requirements."""
+    from fastapi import HTTPException, status
+
+    from app.services import settlement
+
+    try:
+        result = await settlement.create_checkout(
+            db,
+            buyer=agent,
+            listing_id=body.listing_id,
+            idempotency_key=body.idempotency_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    txn = result.transaction
+    return {
+        "transaction_id": str(txn.id),
+        "status": txn.status.value if hasattr(txn.status, "value") else str(txn.status),
+        "reused": result.reused,
+        "payment": result.payment_requirements,
+    }
+
+
+@router.post("/buy/{txn_id}/pay")
+async def pay_checkout(
+    txn_id: UUID,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Sign USDC TransferWithAuthorization via Turnkey and settle through XPay facilitator."""
+    from fastapi import HTTPException, status
+
+    from app.services import settlement
+
+    try:
+        return await settlement.pay_and_settle(db, buyer=agent, txn_id=txn_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc

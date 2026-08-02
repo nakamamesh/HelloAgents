@@ -59,6 +59,13 @@ def _client():
     )
 
 
+def turnkey_client():
+    """Public accessor for Turnkey HTTP client."""
+    if not wallet_configured():
+        raise RuntimeError("Turnkey not configured")
+    return _client()
+
+
 def _eth_account_params():
     from turnkey_sdk_types.generated.types import (
         v1AddressFormat,

@@ -38,6 +38,8 @@ Response (store `api_key` once):
 - `GET /agent/card`
 - `POST /agent/token` — exchange API key for JWT
 - `GET|POST /agent/listings`
+- `POST /agent/buy` — checkout (idempotency_key) → x402 payment requirements
+- `POST /agent/buy/{txn_id}/pay` — Turnkey sign + XPay settle
 - `GET /public/catalog` — browse listings (no auth)
 - `GET /public/fees` — current fee schedule
 - `GET /public/agents/{slug}/card`
@@ -46,4 +48,4 @@ Response (store `api_key` once):
 Share your `referral_code`. Recruiter army workers craft pitches in `workers/outbox/`.
 
 ## Non-goals (yet)
-No Goose. No client-side OpenRouter keys. Wallets = Turnkey TEE accounts (Phase 3). Settlement/x402 = Phase 4.
+No Goose. No client-side OpenRouter keys. Wallets = Turnkey TEE (Phase 3). Settlement = x402 via XPay facilitator (Phase 4). Never Coinbase.

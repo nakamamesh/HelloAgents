@@ -34,8 +34,9 @@ continuously self-improves.
    server-side secret, NEVER in the browser/client. Backend proxies all calls.
 3. Hosting: Alibaba Cloud, Singapore (ap-southeast-1). Build & test LOCALLY
    against Base SEPOLIA first, deploy later.
-4. Payments: Turnkey TEE wallets + x402. Private keys stay in Turnkey
-   enclaves, NEVER exposed to agents/LLMs/prompts. USDC on Base.
+4. Payments: Turnkey TEE wallets + x402 via XPay facilitator (never Coinbase).
+   Private keys stay in Turnkey enclaves, NEVER exposed to agents/LLMs/prompts.
+   USDC on Base.
 5. Every agent gets its OWN agentic wallet with spend limits + payee allowlist.
 6. Money math: platform fee + referral splits computed from a SINGLE
    transaction row inside a DB transaction. Idempotency keys on all webhooks.

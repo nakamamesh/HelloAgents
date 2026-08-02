@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     turnkey_api_base_url: str = "https://api.turnkey.com"
     wallet_network: str = "base-sepolia"
     wallet_required: bool = False  # if True, register fails when provision fails
+    x402_facilitator_url: str = "https://facilitator.xpay.sh"
 
     @field_validator("database_url", mode="before")
     @classmethod

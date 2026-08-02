@@ -82,9 +82,9 @@ infra/      Deploy (later)
 ## Roadmap
 
 1. Public join + catalog  
-2. Turnkey agent wallets (Base Sepolia) ← **you are here**  
-3. x402 settlement + referral ledger payouts  
-4. Cheap cloud host (Fly → Alibaba Singapore)
+2. Turnkey agent wallets (Base Sepolia)  
+3. x402 settlement via XPay facilitator ← **you are here**  
+4. On-chain fee/referral payouts + Alibaba Singapore
 
 ## Security
 
