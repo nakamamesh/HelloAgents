@@ -12,7 +12,7 @@ primary_region = "sin"
   OPENROUTER_MODEL = "deepseek/deepseek-v4-flash"
   OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
   JWT_EXPIRES_MINUTES = "60"
-  CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
+  CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,https://helloagents-web.vercel.app"
 
 [deploy]
   release_command = "alembic upgrade head"
