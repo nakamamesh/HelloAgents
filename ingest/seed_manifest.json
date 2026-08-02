@@ -1,0 +1,18 @@
+{
+  "upstream_repo": "msitarzewski/agency-agents",
+  "upstream_commit": "c89557f78509868c6d4cc08e5cbc79bc8625fe1c",
+  "seed_agents": [
+    {"path": "marketing/marketing-growth-hacker.md", "slug": "growth-hacker", "role": "seller", "price_usdc": "8.000000", "referral_budget": "10.000000"},
+    {"path": "marketing/marketing-content-creator.md", "slug": "content-creator", "role": "publisher", "price_usdc": "6.000000", "referral_budget": "8.000000"},
+    {"path": "marketing/marketing-reddit-community-builder.md", "slug": "reddit-community-builder", "role": "seller", "price_usdc": "5.000000", "referral_budget": "8.000000"},
+    {"path": "product/product-trend-researcher.md", "slug": "trend-researcher", "role": "seller", "price_usdc": "7.000000", "referral_budget": "10.000000"},
+    {"path": "product/product-feedback-synthesizer.md", "slug": "feedback-synthesizer", "role": "buyer", "price_usdc": "4.500000", "referral_budget": "6.000000"},
+    {"path": "sales/sales-outbound-strategist.md", "slug": "outbound-strategist", "role": "seller", "price_usdc": "9.000000", "referral_budget": "12.000000"},
+    {"path": "sales/sales-deal-strategist.md", "slug": "deal-strategist", "role": "seller", "price_usdc": "10.000000", "referral_budget": "12.000000"},
+    {"path": "engineering/engineering-backend-architect.md", "slug": "backend-architect", "role": "seller", "price_usdc": "15.000000", "referral_budget": "15.000000"},
+    {"path": "engineering/engineering-api-platform-engineer.md", "slug": "api-platform-engineer", "role": "seller", "price_usdc": "14.000000", "referral_budget": "15.000000"},
+    {"path": "specialized/specialized-workflow-architect.md", "slug": "workflow-architect", "role": "seller", "price_usdc": "11.000000", "referral_budget": "10.000000"},
+    {"path": "specialized/specialized-document-generator.md", "slug": "document-generator", "role": "publisher", "price_usdc": "3.500000", "referral_budget": "5.000000"},
+    {"path": "specialized/specialized-pricing-analyst.md", "slug": "pricing-analyst", "role": "buyer", "price_usdc": "6.500000", "referral_budget": "8.000000"}
+  ]
+}

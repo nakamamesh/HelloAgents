@@ -1,0 +1,193 @@
+"""Ingest Agency personas into persona_versions + seed marketplace agents."""
+
+from __future__ import annotations
+
+import json
+import sys
+from decimal import Decimal
+from pathlib import Path
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.orm import (
+    Agent,
+    AgentRole,
+    AgentStatus,
+    Listing,
+    ListingStatus,
+    PersonaVersion,
+    UpstreamSyncAudit,
+)
+from app.services.auth import hash_api_key
+from app.services.registry import mint_api_key
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+INGEST_ROOT = REPO_ROOT / "ingest"
+SNAPSHOT = INGEST_ROOT / "snapshot"
+MANIFEST = INGEST_ROOT / "seed_manifest.json"
+
+if str(INGEST_ROOT) not in sys.path:
+    sys.path.insert(0, str(INGEST_ROOT))
+
+from persona import convert_to_helloagents  # noqa: E402
+
+
+def upstream_commit() -> str:
+    return (SNAPSHOT / "UPSTREAM_COMMIT").read_text(encoding="utf-8").strip()
+
+
+async def sync_personas(db: AsyncSession) -> dict:
+    """Parse snapshot → upsert persona_versions; write UPSTREAM_SYNC audit."""
+    commit = upstream_commit()
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    changed: list[str] = []
+    conflicts: list[str] = []
+    versions: list[PersonaVersion] = []
+
+    for item in manifest["seed_agents"]:
+        rel = item["path"]
+        path = SNAPSHOT / rel
+        persona = convert_to_helloagents(path, default_price_usdc=item["price_usdc"])
+        source_path = rel
+
+        existing = await db.execute(
+            select(PersonaVersion).where(
+                PersonaVersion.source_path == source_path,
+                PersonaVersion.upstream_commit == commit,
+            )
+        )
+        row = existing.scalar_one_or_none()
+        if row is not None:
+            if row.agent_card.get("tools") != persona.agent_card.get("tools"):
+                conflicts.append(source_path)
+            continue
+
+        prior = await db.execute(
+            select(PersonaVersion)
+            .where(PersonaVersion.source_path == source_path)
+            .order_by(PersonaVersion.version.desc())
+        )
+        last = prior.scalars().first()
+        version_n = (last.version + 1) if last else 1
+
+        row = PersonaVersion(
+            name=persona.name,
+            description=persona.description,
+            emoji=persona.emoji,
+            vibe=persona.vibe,
+            division=persona.division,
+            identity=persona.identity,
+            mission=persona.mission,
+            workflow=persona.workflow,
+            deliverables=persona.deliverables,
+            success_metrics=persona.success_metrics,
+            sellable_capabilities=persona.sellable_capabilities,
+            catalog_products=persona.catalog_products,
+            agent_card=persona.agent_card,
+            source_path=source_path,
+            upstream_commit=commit,
+            version=version_n,
+        )
+        db.add(row)
+        changed.append(source_path)
+        versions.append(row)
+
+    audit = UpstreamSyncAudit(
+        upstream_commit=commit,
+        personas_changed=changed,
+        local_override_conflicts=conflicts,
+        notes="CI snapshot sync",
+    )
+    db.add(audit)
+    await db.commit()
+    for v in versions:
+        await db.refresh(v)
+
+    return {
+        "upstream_commit": commit,
+        "personas_changed": changed,
+        "local_override_conflicts": conflicts,
+        "persona_version_ids": [str(v.id) for v in versions],
+    }
+
+
+async def seed_marketplace(db: AsyncSession) -> dict:
+    """Create 12 agents + bootstrap listings from manifest (no wallets)."""
+    sync = await sync_personas(db)
+    commit = sync["upstream_commit"]
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    created_agents: list[dict] = []
+    api_keys: dict[str, str] = {}
+
+    for item in manifest["seed_agents"]:
+        slug = item["slug"]
+        existing = await db.execute(select(Agent).where(Agent.slug == slug))
+        if existing.scalar_one_or_none():
+            continue
+
+        pv = await db.execute(
+            select(PersonaVersion).where(
+                PersonaVersion.source_path == item["path"],
+                PersonaVersion.upstream_commit == commit,
+            )
+        )
+        persona = pv.scalar_one_or_none()
+        if persona is None:
+            pv = await db.execute(
+                select(PersonaVersion)
+                .where(PersonaVersion.source_path == item["path"])
+                .order_by(PersonaVersion.version.desc())
+            )
+            persona = pv.scalars().first()
+
+        raw_key = mint_api_key()
+        agent = Agent(
+            slug=slug,
+            name=persona.name if persona else slug,
+            description=persona.description if persona else None,
+            role=AgentRole(item["role"]),
+            status=AgentStatus.ACTIVE,
+            persona_version_id=persona.id if persona else None,
+            api_key_hash=hash_api_key(raw_key),
+            reputation_score=Decimal("1.000000"),
+            referral_budget=Decimal(item["referral_budget"]),
+            wallet_id=None,
+            meta={"seed": True, "upstream_commit": commit},
+        )
+        db.add(agent)
+        await db.flush()
+
+        title = (
+            persona.catalog_products[0]["title"]
+            if persona and persona.catalog_products
+            else f"{slug} bootstrap"
+        )
+        listing = Listing(
+            agent_id=agent.id,
+            title=title,
+            description=persona.description if persona else None,
+            price_usdc=Decimal(item["price_usdc"]),
+            status=ListingStatus.ACTIVE,
+            capabilities=(persona.sellable_capabilities[:4] if persona else []),
+            meta={"bootstrap": True},
+        )
+        db.add(listing)
+        api_keys[slug] = raw_key
+        created_agents.append({"slug": slug, "id": str(agent.id), "role": item["role"]})
+
+    await db.commit()
+    return {
+        "sync": sync,
+        "created_agents": created_agents,
+        "api_keys": api_keys,
+        "note": "wallet_id left null until Phase 3",
+    }
+
+
+async def get_persona_for_agent(db: AsyncSession, agent_id: UUID) -> PersonaVersion | None:
+    agent = await db.get(Agent, agent_id)
+    if agent is None or agent.persona_version_id is None:
+        return None
+    return await db.get(PersonaVersion, agent.persona_version_id)
