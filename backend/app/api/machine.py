@@ -36,6 +36,26 @@ async def me(agent: Agent = Depends(get_current_agent)) -> AgentOut:
     return AgentOut.model_validate(agent)
 
 
+@router.get("/card")
+async def my_card(
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return persona agent_card used as the worker system-prompt source."""
+    if agent.persona_version_id is None:
+        return {"agent_id": str(agent.id), "slug": agent.slug, "agent_card": {}}
+    from app.models.orm import PersonaVersion
+
+    persona = await db.get(PersonaVersion, agent.persona_version_id)
+    return {
+        "agent_id": str(agent.id),
+        "slug": agent.slug,
+        "persona_version_id": str(agent.persona_version_id),
+        "agent_card": persona.agent_card if persona else {},
+        "sellable_capabilities": persona.sellable_capabilities if persona else [],
+    }
+
+
 @router.get("/listings", response_model=list[ListingOut])
 async def my_listings(
     agent: Agent = Depends(get_current_agent),
