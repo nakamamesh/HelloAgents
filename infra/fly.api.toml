@@ -1,0 +1,29 @@
+# HelloAgents API — Fly.io
+# Deploy: fly launch --config infra/fly.api.toml (from repo root) or see infra/README.md
+
+app = "helloagents-api"
+primary_region = "sin"
+
+[build]
+  dockerfile = "../backend/Dockerfile"
+  ignorefile = "../backend/.dockerignore"
+
+[env]
+  APP_ENV = "production"
+  APP_NAME = "HelloAgents"
+  OPENROUTER_MODEL = "deepseek/deepseek-v4-flash"
+  OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+  JWT_EXPIRES_MINUTES = "60"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

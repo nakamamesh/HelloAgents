@@ -29,11 +29,28 @@ class Settings(BaseSettings):
     admin_api_key: str = "dev-admin-change-me"
     jwt_secret: str = "dev-jwt-change-me-to-at-least-32-chars"
     jwt_expires_minutes: int = 60
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value: object) -> object:
+        """Fly/Railway often inject postgres:// — force asyncpg driver."""
+        if not isinstance(value, str) or not value:
+            return value
+        url = value.strip()
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://") :]
+        if url.startswith("postgresql://") and "+asyncpg" not in url:
+            url = "postgresql+asyncpg://" + url[len("postgresql://") :]
+        return url
 
     @field_validator("openrouter_api_key", "admin_api_key", "jwt_secret", mode="before")
     @classmethod
     def strip_secrets(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
+
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache
