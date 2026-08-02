@@ -1,4 +1,4 @@
-"""Coinbase CDP agentic wallets — provision + balance (Phase 3). No settlement."""
+"""Turnkey agent wallets — provision + balance (Phase 3). No settlement."""
 
 from __future__ import annotations
 
@@ -13,98 +13,165 @@ logger = logging.getLogger(__name__)
 
 _NAME_RE = re.compile(r"[^a-z0-9\-]+")
 
+_CAIP2 = {
+    "base-sepolia": "eip155:84532",
+    "base": "eip155:8453",
+    "base-mainnet": "eip155:8453",
+}
+
 
 @dataclass(frozen=True)
 class WalletProvision:
-    wallet_id: str  # CDP account name
+    wallet_id: str  # Turnkey wallet id
     address: str
     network: str
 
 
-def cdp_configured() -> bool:
+def wallet_configured() -> bool:
     s = get_settings()
-    return bool(s.cdp_api_key_id and s.cdp_api_key_secret and s.cdp_wallet_secret)
+    return bool(
+        s.turnkey_organization_id
+        and s.turnkey_api_public_key
+        and s.turnkey_api_private_key
+    )
 
 
 def account_name_for_slug(slug: str) -> str:
-    cleaned = _NAME_RE.sub("-", slug.lower()).strip("-")[:100]
+    cleaned = _NAME_RE.sub("-", slug.lower()).strip("-")[:80]
     return f"ha-{cleaned}"
 
 
+def _client():
+    from turnkey_api_key_stamper import ApiKeyStamper, ApiKeyStamperConfig
+    from turnkey_http import TurnkeyClient
+
+    settings = get_settings()
+    stamper = ApiKeyStamper(
+        ApiKeyStamperConfig(
+            api_public_key=settings.turnkey_api_public_key,
+            api_private_key=settings.turnkey_api_private_key,
+        )
+    )
+    return TurnkeyClient(
+        base_url=settings.turnkey_api_base_url,
+        stamper=stamper,
+        organization_id=settings.turnkey_organization_id,
+    )
+
+
+def _eth_account_params():
+    from turnkey_sdk_types.generated.types import (
+        v1AddressFormat,
+        v1Curve,
+        v1PathFormat,
+        v1WalletAccountParams,
+    )
+
+    return v1WalletAccountParams(
+        curve=v1Curve.CURVE_SECP256K1,
+        pathFormat=v1PathFormat.PATH_FORMAT_BIP32,
+        path="m/44'/60'/0'/0/0",
+        addressFormat=v1AddressFormat.ADDRESS_FORMAT_ETHEREUM,
+    )
+
+
 async def provision_evm_account(slug: str) -> WalletProvision | None:
-    """Idempotent CDP EVM account for an agent. None if CDP not configured."""
-    if not cdp_configured():
-        logger.info("CDP not configured — skip wallet for %s", slug)
+    """Idempotent Turnkey EVM wallet for an agent. None if Turnkey not configured."""
+    if not wallet_configured():
+        logger.info("Turnkey not configured — skip wallet for %s", slug)
         return None
 
     settings = get_settings()
     name = account_name_for_slug(slug)
-    from cdp import CdpClient
-    from cdp.update_account_types import UpdateAccountOptions
+    from turnkey_sdk_types.generated.types import (
+        CreateWalletBody,
+        GetWalletAccountsBody,
+        GetWalletsBody,
+    )
 
-    async with CdpClient(
-        api_key_id=settings.cdp_api_key_id,
-        api_key_secret=settings.cdp_api_key_secret,
-        wallet_secret=settings.cdp_wallet_secret,
-    ) as cdp:
-        account = await cdp.evm.get_or_create_account(name=name)
-        if settings.cdp_account_policy_id:
-            try:
-                account = await cdp.evm.update_account(
-                    address=account.address,
-                    update=UpdateAccountOptions(
-                        account_policy=settings.cdp_account_policy_id
-                    ),
+    client = _client()
+    org = settings.turnkey_organization_id
+
+    existing = client.get_wallets(GetWalletsBody(organizationId=org))
+    for w in existing.wallets or []:
+        if getattr(w, "walletName", None) == name:
+            accounts = client.get_wallet_accounts(
+                GetWalletAccountsBody(organizationId=org, walletId=w.walletId)
+            )
+            address = None
+            for acc in accounts.accounts or []:
+                address = getattr(acc, "address", None)
+                if address:
+                    break
+            if address:
+                return WalletProvision(
+                    wallet_id=w.walletId,
+                    address=address,
+                    network=settings.wallet_network,
                 )
-            except Exception:  # noqa: BLE001
-                logger.warning("Could not attach CDP policy to %s", name, exc_info=True)
 
+    created = client.create_wallet(
+        CreateWalletBody(
+            organizationId=org,
+            walletName=name,
+            accounts=[_eth_account_params()],
+        )
+    )
+    addresses = list(created.addresses or [])
+    if not addresses:
+        raise RuntimeError(f"Turnkey created wallet {created.walletId} with no address")
     return WalletProvision(
-        wallet_id=name,
-        address=account.address,
-        network=settings.cdp_network,
+        wallet_id=created.walletId,
+        address=addresses[0],
+        network=settings.wallet_network,
     )
 
 
 async def ensure_treasury_wallet() -> WalletProvision | None:
-    """Platform fee treasury account (separate from agent wallets)."""
     return await provision_evm_account("platform-treasury")
 
 
 async def list_balances(address: str) -> dict[str, Any]:
-    """Read token balances for an address on configured network."""
-    if not cdp_configured():
+    """Read balances for an address via Turnkey (network from settings)."""
+    if not wallet_configured():
         return {"configured": False, "balances": []}
 
     settings = get_settings()
-    from cdp import CdpClient
+    caip2 = _CAIP2.get(settings.wallet_network, settings.wallet_network)
+    from turnkey_sdk_types.generated.types import GetWalletAddressBalancesBody
 
-    async with CdpClient(
-        api_key_id=settings.cdp_api_key_id,
-        api_key_secret=settings.cdp_api_key_secret,
-        wallet_secret=settings.cdp_wallet_secret,
-    ) as cdp:
-        result = await cdp.evm.list_token_balances(
+    client = _client()
+    result = client.get_wallet_address_balances(
+        GetWalletAddressBalancesBody(
+            organizationId=settings.turnkey_organization_id,
             address=address,
-            network=settings.cdp_network,
+            caip2=caip2,
         )
+    )
 
     balances: list[dict[str, str]] = []
-    for item in result.balances:
-        token = item.token
-        amount = item.amount
+    for item in result.balances or []:
         balances.append(
             {
-                "symbol": str(getattr(token, "symbol", None) or "?"),
-                "amount": str(getattr(amount, "amount", amount)),
-                "decimals": str(getattr(amount, "decimals", "")),
-                "contract": str(getattr(token, "contract_address", None) or ""),
+                "symbol": str(
+                    getattr(item, "symbol", None) or getattr(item, "asset", None) or "?"
+                ),
+                "amount": str(
+                    getattr(item, "balance", None)
+                    or getattr(item, "amount", None)
+                    or "0"
+                ),
+                "contract": str(
+                    getattr(item, "address", None)
+                    or getattr(item, "contractAddress", None)
+                    or ""
+                ),
             }
         )
 
     return {
         "configured": True,
-        "network": settings.cdp_network,
+        "network": settings.wallet_network,
         "address": address,
         "balances": balances,
     }

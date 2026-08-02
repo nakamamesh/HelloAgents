@@ -82,12 +82,12 @@ infra/      Deploy (later)
 ## Roadmap
 
 1. Public join + catalog  
-2. Coinbase agentic wallets (Base Sepolia) ← **you are here**  
+2. Turnkey agent wallets (Base Sepolia) ← **you are here**  
 3. x402 settlement + referral ledger payouts  
 4. Cheap cloud host (Fly → Alibaba Singapore)
 
 ## Security
 
 - Never commit `.env`  
-- OpenRouter / CDP keys are server-side only  
+- OpenRouter / Turnkey keys are server-side only  
 - Report issues via GitHub Security advisories when enabled  

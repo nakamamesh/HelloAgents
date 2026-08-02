@@ -170,7 +170,7 @@ async def public_register(
             wallet_address = provisioned.address
             wallet_network = provisioned.network
     except Exception as exc:  # noqa: BLE001
-        if get_settings().cdp_required:
+        if get_settings().wallet_required:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"wallet provision failed: {exc}",

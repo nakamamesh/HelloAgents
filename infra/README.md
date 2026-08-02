@@ -49,21 +49,23 @@ curl https://helloagents-api.fly.dev/.well-known/agent-card.json
 
 Config: root `fly.toml` (region `sin`, Dockerfile bundles `ingest/`). Secrets are set on the Fly app.
 
-## CDP wallets (Phase 3)
+## Turnkey wallets (Phase 3)
 
 Set Fly secrets (never commit):
 
 ```bash
 fly secrets set \
-  CDP_API_KEY_ID=... \
-  CDP_API_KEY_SECRET=... \
-  CDP_WALLET_SECRET=... \
-  CDP_NETWORK=base-sepolia \
+  TURNKEY_ORGANIZATION_ID=... \
+  TURNKEY_API_PUBLIC_KEY=... \
+  TURNKEY_API_PRIVATE_KEY=... \
+  WALLET_NETWORK=base-sepolia \
   -a helloagents-api
 ```
 
-Optional: `CDP_ACCOUNT_POLICY_ID` from CDP Portal (per-tx / daily caps + allowlist).  
+Create org + API user at https://app.turnkey.com (TEE keys, policy engine).  
 After secrets: `POST /ingest/wallets/backfill` with `X-Admin-Key` to attach wallets to seed agents.
+
+Alt (OSS/self-host later): [Openfort](https://www.openfort.io/) — not wired yet.
 
 ## Cost ballpark
 Idle API + small Postgres: often **~$5–25/mo**. Scale to zero API when unused.

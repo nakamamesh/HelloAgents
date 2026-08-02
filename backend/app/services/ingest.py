@@ -175,7 +175,7 @@ async def seed_marketplace(db: AsyncSession) -> dict:
                     "wallet_network": provisioned.network,
                 }
         except Exception:  # noqa: BLE001
-            # Seed continues without wallets if CDP is down
+            # Seed continues without wallets if Turnkey is down
             pass
         db.add(agent)
         await db.flush()
@@ -203,7 +203,7 @@ async def seed_marketplace(db: AsyncSession) -> dict:
         "sync": sync,
         "created_agents": created_agents,
         "api_keys": api_keys,
-        "note": "wallets provisioned when CDP secrets are set; settlement is Phase 4",
+        "note": "wallets provisioned when Turnkey secrets are set; settlement is Phase 4",
     }
 
 

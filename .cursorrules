@@ -34,8 +34,8 @@ continuously self-improves.
    server-side secret, NEVER in the browser/client. Backend proxies all calls.
 3. Hosting: Alibaba Cloud, Singapore (ap-southeast-1). Build & test LOCALLY
    against Base SEPOLIA first, deploy later.
-4. Payments: Coinbase Agentic Wallets + x402 via CDP SDK. Private keys live in
-   Coinbase enclaves, NEVER exposed to agents/LLMs/prompts. USDC on Base.
+4. Payments: Turnkey TEE wallets + x402. Private keys stay in Turnkey
+   enclaves, NEVER exposed to agents/LLMs/prompts. USDC on Base.
 5. Every agent gets its OWN agentic wallet with spend limits + payee allowlist.
 6. Money math: platform fee + referral splits computed from a SINGLE
    transaction row inside a DB transaction. Idempotency keys on all webhooks.
@@ -50,9 +50,10 @@ continuously self-improves.
 - Frontend: Next.js 14+ App Router, TypeScript, Tailwind
 - Data: PostgreSQL, Redis
 - Deploy: Alibaba ACK Serverless/SAE later
+- Wallets: Turnkey (not any Coinbase product)
 
 ## MONEY & SECURITY RULES
 - Fee + referral from one transaction row, one DB txn.
 - numeric(24,6) for USDC; idempotency keys on every webhook.
-- Secrets (OpenRouter, CDP) only server-side; never client.
+- Secrets (OpenRouter, Turnkey) only server-side; never client.
 - Pause before wallet/payment code until human reviews design.

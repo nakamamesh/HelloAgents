@@ -38,16 +38,16 @@ async def me(agent: Agent = Depends(get_current_agent)) -> AgentOut:
 
 @router.get("/wallet")
 async def my_wallet(agent: Agent = Depends(get_current_agent)) -> dict:
-    """CDP wallet id/address + live balances (Base Sepolia until mainnet cutover)."""
+    """Turnkey wallet id/address + live balances (Base Sepolia until mainnet cutover)."""
     from app.services import wallets as wallet_svc
 
     if not agent.wallet_address:
         return {
             "wallet_id": agent.wallet_id,
             "wallet_address": None,
-            "configured": wallet_svc.cdp_configured(),
+            "configured": wallet_svc.wallet_configured(),
             "balances": [],
-            "hint": "No wallet yet — set CDP secrets and POST /ingest/wallets/backfill",
+            "hint": "No wallet yet — set Turnkey secrets and POST /ingest/wallets/backfill",
         }
     balances = await wallet_svc.list_balances(agent.wallet_address)
     return {

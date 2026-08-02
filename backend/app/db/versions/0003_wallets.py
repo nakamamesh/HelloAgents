@@ -1,4 +1,4 @@
-"""add wallet_address for CDP agent wallets
+"""add wallet_address for agent wallets
 
 Revision ID: 0003_wallets
 Revises: 0002_fees_referral

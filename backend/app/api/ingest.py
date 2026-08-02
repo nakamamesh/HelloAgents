@@ -27,14 +27,14 @@ async def seed_marketplace(db: AsyncSession = Depends(get_db)) -> dict:
 
 @router.post("/wallets/backfill")
 async def backfill_wallets(db: AsyncSession = Depends(get_db)) -> dict:
-    """Provision CDP wallets for agents missing wallet_address."""
+    """Provision Turnkey wallets for agents missing wallet_address."""
     from sqlalchemy import select
 
     from app.models.orm import Agent
     from app.services import wallets as wallet_svc
 
-    if not wallet_svc.cdp_configured():
-        return {"ok": False, "error": "CDP secrets not configured"}
+    if not wallet_svc.wallet_configured():
+        return {"ok": False, "error": "Turnkey secrets not configured"}
 
     result = await db.execute(select(Agent).where(Agent.wallet_address.is_(None)))
     agents = list(result.scalars().all())

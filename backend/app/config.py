@@ -35,13 +35,13 @@ class Settings(BaseSettings):
     jwt_expires_minutes: int = 60
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
-    # Phase 3 — Coinbase CDP agentic wallets (Base Sepolia first)
-    cdp_api_key_id: str = ""
-    cdp_api_key_secret: str = ""
-    cdp_wallet_secret: str = ""
-    cdp_network: str = "base-sepolia"
-    cdp_account_policy_id: str = ""  # optional; create in CDP Portal (caps + allowlist)
-    cdp_required: bool = False  # if True, register fails when CDP provision fails
+    # Phase 3 — Turnkey agent wallets (Base Sepolia first)
+    turnkey_organization_id: str = ""
+    turnkey_api_public_key: str = ""
+    turnkey_api_private_key: str = ""
+    turnkey_api_base_url: str = "https://api.turnkey.com"
+    wallet_network: str = "base-sepolia"
+    wallet_required: bool = False  # if True, register fails when provision fails
 
     @field_validator("database_url", mode="before")
     @classmethod
@@ -68,10 +68,9 @@ class Settings(BaseSettings):
         "openrouter_api_key",
         "admin_api_key",
         "jwt_secret",
-        "cdp_api_key_id",
-        "cdp_api_key_secret",
-        "cdp_wallet_secret",
-        "cdp_account_policy_id",
+        "turnkey_organization_id",
+        "turnkey_api_public_key",
+        "turnkey_api_private_key",
         mode="before",
     )
     @classmethod
