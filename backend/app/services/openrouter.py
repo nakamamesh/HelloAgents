@@ -48,7 +48,7 @@ async def chat(
     }
 
     url = f"{settings.openrouter_base_url.rstrip('/')}/chat/completions"
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
         resp = await client.post(url, headers=headers, json=payload)
 
     if resp.status_code >= 400:
