@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     wallet_network: str = "base-sepolia"
     wallet_required: bool = False  # if True, register fails when provision fails
     x402_facilitator_url: str = "https://facilitator.xpay.sh"
+    settlement_dry_run: bool = False  # skip on-chain when faucets unavailable
 
     @field_validator("database_url", mode="before")
     @classmethod

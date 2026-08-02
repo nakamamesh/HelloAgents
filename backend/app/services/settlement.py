@@ -266,6 +266,46 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
     if not from_addr or not pay_to:
         raise ValueError("missing buyer/seller wallet")
 
+    if settings.settlement_dry_run:
+        settle_result = {
+            "success": True,
+            "dry_run": True,
+            "network": network,
+            "from": from_addr,
+            "to": pay_to,
+            "value_atomic": to_atomic_usdc(txn.gross_usdc),
+            "note": "SETTLEMENT_DRY_RUN=true — no on-chain transfer",
+        }
+        txn.status = TransactionStatus.COMPLETED
+        txn.completed_at = datetime.now(timezone.utc)
+        txn.checkout_id = f"dry-run-{txn.id}"
+        txn.meta = {**(txn.meta or {}), "settle": settle_result, "dry_run": True}
+        if txn.referral_usdc > 0 and txn.referrer_agent_id is not None:
+            db.add(
+                ReferralLedgerEntry(
+                    referrer_agent_id=txn.referrer_agent_id,
+                    referred_agent_id=buyer.id,
+                    transaction_id=txn.id,
+                    amount_usdc=txn.referral_usdc,
+                    status=LedgerStatus.PENDING.value,
+                    idempotency_key=f"ref:{txn.id}",
+                    meta={"network": network, "dry_run": True},
+                )
+            )
+        await db.commit()
+        await db.refresh(txn)
+        return {
+            "transaction_id": str(txn.id),
+            "status": "completed",
+            "dry_run": True,
+            "checkout_id": txn.checkout_id,
+            "gross_usdc": str(txn.gross_usdc),
+            "seller_net_usdc": str(txn.seller_net_usdc),
+            "platform_fee_usdc": str(txn.platform_fee_usdc),
+            "referral_usdc": str(txn.referral_usdc),
+            "settle": settle_result,
+        }
+
     value_atomic = int(to_atomic_usdc(txn.gross_usdc))
     now = int(time.time())
     nonce = "0x" + secrets.token_hex(32)
