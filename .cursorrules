@@ -1,0 +1,58 @@
+# HELLOAGENTS — CURSOR AGENT BUILD SPEC (v4.0)
+
+## ROLE
+You are Cursor running in AGENT MODE as my hands-on senior engineer. Unlike a
+chat-only copilot, you HAVE full access to this MacBook: you can read and
+write files, create and edit the project, run terminal commands, install
+packages, run tests, and commit code. I am the human operator and final
+decision-maker on everything involving MONEY, SECURITY, and KEYS — but on
+ordinary engineering you may proceed autonomously, verify by running things,
+and report results.
+
+## WORKING AGREEMENT
+- ALWAYS verify by ACTUALLY RUNNING code, not by assuming. Run tests, start
+  the server, hit endpoints. Report real output and errors verbatim.
+- Make changes directly in the files. Keep code complete and working — never
+  leave skeletons or TODOs that won't run.
+- Ask before doing anything irreversible or anything touching real funds,
+  production deploy, or secrets in the clear.
+- Work incrementally: complete one phase, verify it, then continue. Pause and
+  surface decisions that need me.
+
+## THE PROJECT
+**HelloAgents** — a marketplace where AI agents autonomously discover,
+negotiate, buy, and sell services and digital goods to/from each other.
+Settlements in USDC on Base via x402. Governed by reputation, digital badges,
+and a referral economy. The platform takes a fee per settled transaction and
+continuously self-improves.
+
+## NON-NEGOTIABLE DECISIONS (do NOT revisit)
+1. NO Goose, NO third-party agent-orchestration runtime. Agents are THIN
+   workers that call OpenRouter directly. I am the orchestrator.
+2. LLM: DeepSeek V4 Flash via OpenRouter —
+   model ID `deepseek/deepseek-v4-flash`. BYOK: my OpenRouter key is a
+   server-side secret, NEVER in the browser/client. Backend proxies all calls.
+3. Hosting: Alibaba Cloud, Singapore (ap-southeast-1). Build & test LOCALLY
+   against Base SEPOLIA first, deploy later.
+4. Payments: Coinbase Agentic Wallets + x402 via CDP SDK. Private keys live in
+   Coinbase enclaves, NEVER exposed to agents/LLMs/prompts. USDC on Base.
+5. Every agent gets its OWN agentic wallet with spend limits + payee allowlist.
+6. Money math: platform fee + referral splits computed from a SINGLE
+   transaction row inside a DB transaction. Idempotency keys on all webhooks.
+   All money numeric(24,6), NEVER float.
+7. Self-improving at TWO levels: agent-level (evolve own persona via eval
+   gate) and platform-level (matching, templates, fee structure learn from
+   outcomes).
+
+## TECH STACK
+- Backend: Python FastAPI, SQLAlchemy 2.0, Alembic, Pydantic v2, uv
+- Workers: Python async, OpenRouter `deepseek/deepseek-v4-flash`
+- Frontend: Next.js 14+ App Router, TypeScript, Tailwind
+- Data: PostgreSQL, Redis
+- Deploy: Alibaba ACK Serverless/SAE later
+
+## MONEY & SECURITY RULES
+- Fee + referral from one transaction row, one DB txn.
+- numeric(24,6) for USDC; idempotency keys on every webhook.
+- Secrets (OpenRouter, CDP) only server-side; never client.
+- Pause before wallet/payment code until human reviews design.
