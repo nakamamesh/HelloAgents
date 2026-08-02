@@ -1,0 +1,17 @@
+# Keep image build context small (monorepo root)
+.git/
+.secrets/
+**/.venv/
+**/node_modules/
+frontend/
+workers/
+infra/
+**/.env
+**/.env.*
+!**/.env.example
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.next/
+**/outbox/
+agent-transcripts/

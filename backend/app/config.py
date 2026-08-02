@@ -1,7 +1,11 @@
 from functools import lru_cache
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# asyncpg rejects libpq-style query params that Fly/Railway often inject
+_ASYNCPG_DROP_QUERY = frozenset({"sslmode", "channel_binding"})
 
 
 class Settings(BaseSettings):
@@ -34,7 +38,7 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, value: object) -> object:
-        """Fly/Railway often inject postgres:// — force asyncpg driver."""
+        """Fly/Railway often inject postgres:// + sslmode — force asyncpg-safe URL."""
         if not isinstance(value, str) or not value:
             return value
         url = value.strip()
@@ -42,7 +46,15 @@ class Settings(BaseSettings):
             url = "postgresql://" + url[len("postgres://") :]
         if url.startswith("postgresql://") and "+asyncpg" not in url:
             url = "postgresql+asyncpg://" + url[len("postgresql://") :]
-        return url
+        parts = urlsplit(url)
+        query = [
+            (k, v)
+            for k, v in parse_qsl(parts.query, keep_blank_values=True)
+            if k.lower() not in _ASYNCPG_DROP_QUERY
+        ]
+        return urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+        )
 
     @field_validator("openrouter_api_key", "admin_api_key", "jwt_secret", mode="before")
     @classmethod

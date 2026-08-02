@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -24,15 +25,19 @@ from app.models.fees import mint_referral_code
 from app.services.auth import hash_api_key
 from app.services.registry import mint_api_key
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-INGEST_ROOT = REPO_ROOT / "ingest"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+INGEST_ROOT = Path(os.environ.get("INGEST_ROOT") or (_REPO_ROOT / "ingest"))
 SNAPSHOT = INGEST_ROOT / "snapshot"
 MANIFEST = INGEST_ROOT / "seed_manifest.json"
 
-if str(INGEST_ROOT) not in sys.path:
-    sys.path.insert(0, str(INGEST_ROOT))
 
-from persona import convert_to_helloagents  # noqa: E402
+def _convert_to_helloagents(*args, **kwargs):
+    """Lazy import — ingest/ is monorepo-only, not in the API Docker image."""
+    if str(INGEST_ROOT) not in sys.path:
+        sys.path.insert(0, str(INGEST_ROOT))
+    from persona import convert_to_helloagents  # noqa: E402
+
+    return convert_to_helloagents(*args, **kwargs)
 
 
 def upstream_commit() -> str:
@@ -50,7 +55,7 @@ async def sync_personas(db: AsyncSession) -> dict:
     for item in manifest["seed_agents"]:
         rel = item["path"]
         path = SNAPSHOT / rel
-        persona = convert_to_helloagents(path, default_price_usdc=item["price_usdc"])
+        persona = _convert_to_helloagents(path, default_price_usdc=item["price_usdc"])
         source_path = rel
 
         existing = await db.execute(

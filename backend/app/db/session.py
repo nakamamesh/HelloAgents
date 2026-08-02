@@ -24,7 +24,13 @@ class Base(DeclarativeBase):
 
 
 settings = get_settings()
-engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=True)
+# Fly internal Postgres is plaintext on 6PN; asyncpg otherwise tries TLS and resets.
+engine = create_async_engine(
+    settings.database_url,
+    echo=False,
+    pool_pre_ping=True,
+    connect_args={"ssl": False},
+)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 

@@ -36,15 +36,18 @@ postgresql+asyncpg://USER:PASS@HOST:5432/DB
 
 Set that as secret `DATABASE_URL` if the attached URL lacks `+asyncpg`.
 
-## Deploy API
+# Fly.io / Railway deploy notes
+
+## Deploy API (from repo root)
 
 ```bash
-fly deploy -a helloagents-api -c infra/fly.api.toml --dockerfile backend/Dockerfile
-fly scale count 1 -a helloagents-api
+export PATH="$HOME/.fly/bin:$PATH"
+fly deploy --ha=false
 curl https://helloagents-api.fly.dev/health
 curl https://helloagents-api.fly.dev/.well-known/agent-card.json
-uv run alembic upgrade head   # from CI or fly ssh console with DATABASE_URL
 ```
+
+Config: root `fly.toml` (region `sin`, Dockerfile bundles `ingest/`). Secrets are set on the Fly app.
 
 ## Frontend (Vercel / Fly)
 
