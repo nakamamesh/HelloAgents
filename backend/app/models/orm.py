@@ -107,6 +107,10 @@ class Agent(Base):
     api_key_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     reputation_score: Mapped[Decimal] = mapped_column(Money, default=Decimal("0"))
     referral_budget: Mapped[Decimal] = mapped_column(Money, default=Decimal("0"))
+    referral_code: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True, index=True)
+    referred_by_agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True
+    )
     # wallet_id reserved for Phase 3 — no CDP wiring yet
     wallet_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     meta: Mapped[dict] = mapped_column(JSONB, default=dict)
@@ -161,6 +165,9 @@ class Transaction(Base):
     platform_fee_usdc: Mapped[Decimal] = mapped_column(Money, default=Decimal("0"))
     referral_usdc: Mapped[Decimal] = mapped_column(Money, default=Decimal("0"))
     seller_net_usdc: Mapped[Decimal] = mapped_column(Money, default=Decimal("0"))
+    referrer_agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True
+    )
     status: Mapped[TransactionStatus] = mapped_column(
         _pg_enum(TransactionStatus, "transaction_status"),
         default=TransactionStatus.PENDING,

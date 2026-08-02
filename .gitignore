@@ -38,3 +38,4 @@ npm-debug.log*
 *.log
 .cache/
 ingest/snapshot/converted.json
+workers/outbox/

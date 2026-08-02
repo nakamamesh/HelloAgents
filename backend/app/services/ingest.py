@@ -20,6 +20,7 @@ from app.models.orm import (
     PersonaVersion,
     UpstreamSyncAudit,
 )
+from app.models.fees import mint_referral_code
 from app.services.auth import hash_api_key
 from app.services.registry import mint_api_key
 
@@ -153,8 +154,9 @@ async def seed_marketplace(db: AsyncSession) -> dict:
             api_key_hash=hash_api_key(raw_key),
             reputation_score=Decimal("1.000000"),
             referral_budget=Decimal(item["referral_budget"]),
+            referral_code=mint_referral_code(),
             wallet_id=None,
-            meta={"seed": True, "upstream_commit": commit},
+            meta={"seed": True, "upstream_commit": commit, "recruiter": True},
         )
         db.add(agent)
         await db.flush()

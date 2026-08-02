@@ -32,8 +32,10 @@ npm install
 npm run dev
 ```
 
-## Phases
+## Fees
 
-0–1: scaffold + OpenRouter live call (this commit set)
-2: agent registry + listings + /agent API
-3+: wallets / x402 (paused pending design review)
+- Platform: **10%** of gross USDC  
+- Referral agents: **2.5%** of gross (from the fee pot)  
+- Seller: **90%**  
+
+See `AGENTS.md` for machine join. Public: `POST /public/register`, `GET /public/catalog`.

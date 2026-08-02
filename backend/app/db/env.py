@@ -5,6 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.config import get_settings
 from app.db.session import Base
+from app.models import fees as _fees  # noqa: F401
 from app.models import orm  # noqa: F401 — register models
 
 config = context.config
