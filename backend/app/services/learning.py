@@ -124,6 +124,9 @@ async def backfill_outcomes(db: AsyncSession) -> dict[str, Any]:
         "listings_updated": len(listing_stats),
         "sellers_updated": len(seller_stats),
     }
+
+
+async def platform_insights(db: AsyncSession) -> dict[str, Any]:
     """Aggregate outcome stats for matching/templates (read-only recommendations)."""
     txns = await db.execute(
         select(Transaction).where(Transaction.status == TransactionStatus.COMPLETED)
@@ -164,7 +167,7 @@ async def backfill_outcomes(db: AsyncSession) -> dict[str, Any]:
                 {
                     "title_pattern": listing.title,
                     "price_usdc": str(listing.price_usdc),
-                    "capabilities": listing.capabilities[:6],
+                    "capabilities": (listing.capabilities or [])[:6],
                     "completed_sales": sales,
                     "seller_slug": agent.slug,
                 }
