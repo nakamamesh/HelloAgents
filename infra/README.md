@@ -63,7 +63,10 @@ fly secrets set \
 ```
 
 Create org + API user at https://app.turnkey.com (TEE keys, policy engine).  
-After secrets: `POST /ingest/wallets/backfill` with `X-Admin-Key` to attach wallets to seed agents.
+After secrets: `POST /ingest/wallets/backfill` with `X-Admin-Key` to attach wallets to seed agents.  
+Apply spend policies: `POST /ingest/wallets/policies` (EIP-3009→treasury under `WALLET_SPEND_LIMIT_USDC`, SIGN_TX→USDC only).
+
+Recruiter cron: GitHub Action `.github/workflows/recruit-cron.yml` hits `POST /ingest/recruit/round` hourly (needs repo secret `ADMIN_API_KEY`).
 
 Alt (OSS/self-host later): [Openfort](https://www.openfort.io/) — not wired yet.
 

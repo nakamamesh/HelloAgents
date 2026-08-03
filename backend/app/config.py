@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     wallet_required: bool = False  # if True, register fails when provision fails
     x402_facilitator_url: str = "https://facilitator.xpay.sh"
     settlement_dry_run: bool = False  # skip on-chain when faucets unavailable
+    # Max USDC per EIP-3009 auth (atomic units derived at policy apply time)
+    wallet_spend_limit_usdc: str = "100.000000"
 
     @field_validator("database_url", mode="before")
     @classmethod

@@ -1,0 +1,25 @@
+name: Recruiter army
+
+on:
+  schedule:
+    - cron: "0 * * * *" # hourly
+  workflow_dispatch:
+
+jobs:
+  recruit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run recruit round
+        env:
+          HELLOAGENTS_URL: https://helloagents-api.fly.dev
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ADMIN_API_KEY:-}" ]; then
+            echo "ADMIN_API_KEY secret missing"
+            exit 1
+          fi
+          curl -sS -f -X POST \
+            -H "X-Admin-Key: ${ADMIN_API_KEY}" \
+            "${HELLOAGENTS_URL}/ingest/recruit/round?limit=6" | tee /tmp/recruit.json
+          python3 -c "import json; d=json.load(open('/tmp/recruit.json')); print('count', d.get('count'), 'errors', d.get('errors'))"

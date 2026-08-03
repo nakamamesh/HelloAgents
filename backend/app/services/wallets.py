@@ -1,10 +1,11 @@
-"""Turnkey agent wallets — provision + balance (Phase 3). No settlement."""
+"""Turnkey agent wallets — provision, balances, spend policies (Phase 3–4)."""
 
 from __future__ import annotations
 
 import logging
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from app.config import get_settings
@@ -18,6 +19,15 @@ _CAIP2 = {
     "base": "eip155:8453",
     "base-mainnet": "eip155:8453",
 }
+
+USDC_BY_NETWORK = {
+    "base-sepolia": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "base": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "base-mainnet": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+}
+
+POLICY_EIP3009 = "ha-allow-eip3009-usdc-capped"
+POLICY_SIGN_TX_USDC = "ha-allow-sign-tx-usdc-contract"
 
 
 @dataclass(frozen=True)
@@ -181,4 +191,127 @@ async def list_balances(address: str) -> dict[str, Any]:
         "network": settings.wallet_network,
         "address": address,
         "balances": balances,
+    }
+
+
+def _spend_limit_atomic() -> int:
+    settings = get_settings()
+    usdc = Decimal(str(settings.wallet_spend_limit_usdc))
+    return int(usdc * Decimal(1_000_000))
+
+
+def _policy_specs(*, treasury_address: str, usdc: str, limit_atomic: int) -> list[dict[str, str]]:
+    """Org ALLOW policies: EIP-3009 to treasury under cap; SIGN_TX only to USDC contract."""
+    return [
+        {
+            "policyName": POLICY_EIP3009,
+            "condition": (
+                "activity.type == 'ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2' && "
+                "eth.eip_712.primary_type == 'TransferWithAuthorization' && "
+                "eth.eip_712.domain.name == 'USDC' && "
+                f"eth.eip_712.domain.verifying_contract == '{usdc}' && "
+                f"eth.eip_712.message.to == '{treasury_address}' && "
+                f"eth.eip_712.message.value <= {limit_atomic}"
+            ),
+            "notes": (
+                f"HelloAgents: EIP-3009 USDC only to treasury, max {limit_atomic} atomic"
+            ),
+        },
+        {
+            "policyName": POLICY_SIGN_TX_USDC,
+            "condition": (
+                "(activity.type == 'ACTIVITY_TYPE_SIGN_TRANSACTION_V2' || "
+                "activity.type == 'ACTIVITY_TYPE_SIGN_TRANSACTION') && "
+                f"eth.tx.to == '{usdc}'"
+            ),
+            "notes": "HelloAgents: EVM txs only to USDC contract (self-settle + ERC20 transfer)",
+        },
+    ]
+
+
+async def ensure_spend_policies(*, treasury_address: str | None = None) -> dict[str, Any]:
+    """Idempotent Turnkey org policies for spend limit + USDC/treasury allowlist."""
+    if not wallet_configured():
+        return {"ok": False, "error": "Turnkey not configured"}
+
+    from turnkey_sdk_types.generated.types import (
+        CreatePolicyBody,
+        GetPoliciesBody,
+        UpdatePolicyBody,
+        v1Effect,
+    )
+
+    settings = get_settings()
+    if not treasury_address:
+        treasury = await ensure_treasury_wallet()
+        if treasury is None:
+            return {"ok": False, "error": "treasury wallet unavailable"}
+        treasury_address = treasury.address
+
+    network = settings.wallet_network
+    usdc = USDC_BY_NETWORK.get(network, USDC_BY_NETWORK["base-sepolia"])
+    limit_atomic = _spend_limit_atomic()
+    specs = _policy_specs(
+        treasury_address=treasury_address, usdc=usdc, limit_atomic=limit_atomic
+    )
+
+    client = _client()
+    org = settings.turnkey_organization_id
+    existing = client.get_policies(GetPoliciesBody(organizationId=org))
+    by_name: dict[str, Any] = {}
+    for p in existing.policies or []:
+        name = getattr(p, "policyName", None) or getattr(p, "name", None)
+        if name:
+            by_name[str(name)] = p
+
+    created: list[str] = []
+    updated: list[str] = []
+    for spec in specs:
+        name = spec["policyName"]
+        prior = by_name.get(name)
+        if prior is None:
+            client.create_policy(
+                CreatePolicyBody(
+                    organizationId=org,
+                    policyName=name,
+                    effect=v1Effect.EFFECT_ALLOW,
+                    condition=spec["condition"],
+                    notes=spec["notes"],
+                )
+            )
+            created.append(name)
+            continue
+        policy_id = getattr(prior, "policyId", None) or getattr(prior, "id", None)
+        prior_cond = getattr(prior, "condition", None) or ""
+        if policy_id and prior_cond != spec["condition"]:
+            client.update_policy(
+                UpdatePolicyBody(
+                    organizationId=org,
+                    policyId=str(policy_id),
+                    policyName=name,
+                    policyEffect=v1Effect.EFFECT_ALLOW,
+                    policyCondition=spec["condition"],
+                    policyNotes=spec["notes"],
+                )
+            )
+            updated.append(name)
+
+    return {
+        "ok": True,
+        "network": network,
+        "usdc": usdc,
+        "treasury": treasury_address,
+        "spend_limit_usdc": str(settings.wallet_spend_limit_usdc),
+        "spend_limit_atomic": limit_atomic,
+        "created": created,
+        "updated": updated,
+        "unchanged": [
+            s["policyName"]
+            for s in specs
+            if s["policyName"] not in created and s["policyName"] not in updated
+        ],
+        "note": (
+            "ALLOW policies only — confirm org has no unrestricted SIGN_* allows "
+            "that bypass these guards"
+        ),
     }
