@@ -1,9 +1,10 @@
 """Machine API for agents — /agent/* (API key or JWT)."""
 
+from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -115,6 +116,45 @@ class BuyRequest(BaseModel):
 class EvaluateRequest(BaseModel):
     task: str = Field(..., min_length=1, max_length=4000)
     deliverable: str = Field(..., min_length=1, max_length=50000)
+    transaction_id: UUID | None = None
+
+
+class DeliverRequest(BaseModel):
+    transaction_id: UUID
+    artifact_uri: str = Field(..., min_length=1, max_length=4000)
+    artifact_payload: str | None = Field(default=None, max_length=100_000)
+
+
+class ReviewRequest(BaseModel):
+    transaction_id: UUID
+    score: Decimal = Field(..., max_digits=5, decimal_places=4)
+    notes: str | None = Field(default=None, max_length=4000)
+    accept: bool = True
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def no_float(cls, v: object) -> object:
+        if isinstance(v, float):
+            raise ValueError("use string Decimal, not float")
+        return v
+
+
+class RefundRequest(BaseModel):
+    transaction_id: UUID
+    reason: str = Field(..., min_length=3, max_length=1000)
+
+
+@router.get("/transactions")
+async def my_transactions(
+    role: str | None = Query(default=None, pattern="^(buyer|seller)$"),
+    limit: int = Query(default=50, ge=1, le=200),
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services import fulfillment as ful
+
+    rows = await ful.list_agent_transactions(db, agent=agent, limit=limit, role=role)
+    return {"agent_id": str(agent.id), "count": len(rows), "transactions": rows}
 
 
 @router.post("/buy")
@@ -166,6 +206,72 @@ async def pay_checkout(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
+@router.post("/deliver")
+async def deliver_order(
+    body: DeliverRequest,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Seller submits artifact for a settled transaction."""
+    from fastapi import HTTPException, status
+
+    from app.services import fulfillment as ful
+
+    try:
+        return await ful.deliver(
+            db,
+            seller=agent,
+            txn_id=body.transaction_id,
+            artifact_uri=body.artifact_uri,
+            artifact_payload=body.artifact_payload,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/review")
+async def review_delivery(
+    body: ReviewRequest,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Buyer scores a delivery; accept=true closes the loop, false opens dispute."""
+    from fastapi import HTTPException, status
+
+    from app.services import fulfillment as ful
+
+    try:
+        return await ful.review(
+            db,
+            buyer=agent,
+            txn_id=body.transaction_id,
+            score=body.score,
+            notes=body.notes,
+            accept=body.accept,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/refund")
+async def refund_request(
+    body: RefundRequest,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Request refund (ledger flag). On-chain return is admin/treasury."""
+    from fastapi import HTTPException, status
+
+    from app.services import fulfillment as ful
+
+    try:
+        return await ful.request_refund(
+            db, agent=agent, txn_id=body.transaction_id, reason=body.reason
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.post("/evaluate")
 async def evaluate_deliverable(
     body: EvaluateRequest,
@@ -175,11 +281,16 @@ async def evaluate_deliverable(
     """Score a deliverable against persona success_metrics; on pass bump reputation + evolve meta."""
     from fastapi import HTTPException, status
 
-    from app.models.orm import PersonaVersion
+    from app.models.orm import PersonaVersion, Transaction
     from app.services import eval_gate, reputation as rep_svc
     from app.services.openrouter import OpenRouterError
 
     metrics = None
+    deliverable = body.deliverable
+    if body.transaction_id:
+        txn = await db.get(Transaction, body.transaction_id)
+        if txn and txn.artifact_uri and (not deliverable or deliverable == "."):
+            deliverable = txn.artifact_uri
     if agent.persona_version_id:
         persona = await db.get(PersonaVersion, agent.persona_version_id)
         if persona:
@@ -187,7 +298,7 @@ async def evaluate_deliverable(
     try:
         result = await eval_gate.evaluate_deliverable(
             success_metrics=metrics,
-            deliverable=body.deliverable,
+            deliverable=deliverable,
             task=body.task,
         )
     except OpenRouterError as exc:
@@ -204,6 +315,7 @@ async def evaluate_deliverable(
     return {
         "agent_id": str(agent.id),
         "slug": agent.slug,
+        "transaction_id": str(body.transaction_id) if body.transaction_id else None,
         "eval": result,
         "self_improve": improve,
         "reputation_score": str(agent.reputation_score),

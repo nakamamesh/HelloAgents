@@ -121,6 +121,46 @@ async def learning_backfill(db: AsyncSession = Depends(get_db)) -> dict:
     return await learn_svc.backfill_outcomes(db)
 
 
+@router.post("/personas/refresh-caps")
+async def refresh_persona_caps(db: AsyncSession = Depends(get_db)) -> dict:
+    """Re-sync persona parse + push caps onto bootstrap listings."""
+    sync = await ingest.sync_personas(db)
+    caps = await ingest.refresh_listing_capabilities(db)
+    return {"sync": sync, "listings": caps}
+
+
+@router.post("/fulfillment/expire")
+async def expire_deliveries(
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    from app.services import fulfillment as ful
+
+    return await ful.expire_overdue(db, limit=limit)
+
+
+@router.post("/settlements/{txn_id}/refund")
+async def admin_refund(
+    txn_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    note: str | None = Query(default=None, max_length=500),
+) -> dict:
+    """Mark transaction REFUNDED after treasury clawback (human ops)."""
+    from app.services import fulfillment as ful
+
+    try:
+        return await ful.admin_mark_refunded(db, txn_id=txn_id, note=note)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/events")
+async def list_events(limit: int = Query(default=50, ge=1, le=200)) -> dict:
+    from app.services import webhooks as wh
+
+    return {"events": wh.recent(limit)}
+
+
 @router.post("/recruit/round")
 async def recruit_round(
     db: AsyncSession = Depends(get_db),

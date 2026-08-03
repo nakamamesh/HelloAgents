@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     treasury_min_eth: str = "0.001"
     # Recruit pitches: False = \$0 template pitches (default); True = OpenRouter polish
     recruit_use_llm: bool = False
+    # Delivery SLA (hours) after settlement before timed_out
+    delivery_sla_hours: int = 72
+    # Rate limit: max register/buy attempts per IP per minute (0 = off)
+    rate_limit_per_minute: int = 30
+    # Escrow-lite: hold seller disperse until accept when gross >= threshold (0 = always instant)
+    escrow_hold_min_usdc: str = "0"
 
     @field_validator("database_url", mode="before")
     @classmethod

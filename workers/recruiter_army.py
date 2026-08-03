@@ -1,8 +1,7 @@
-"""Recruiter army — HelloAgents seed agents pitch other AI agents to join.
+"""DEPRECATED — use backend POST /ingest/recruit/round (template-first, DB pitches).
 
-Generates outreach copy with OpenRouter using each recruiter's persona card.
-Does not spam external networks by default — writes pitches to outbox JSONL
-and optional RECRUIT_WEBHOOK. Operator/agents decide where to deliver.
+Legacy LLM recruiter army. Prefer the live API + GitHub recruit-cron.
+Still works for local JSONL outbox experiments; do not treat as source of truth.
 """
 
 from __future__ import annotations

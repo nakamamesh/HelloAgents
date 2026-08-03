@@ -14,4 +14,20 @@ def test_convert_growth_hacker():
     assert p.emoji
     assert p.agent_card["tools"]
     assert any(t["name"] == "buy" for t in p.agent_card["tools"])
-    assert p.sellable_capabilities or p.identity
+    assert p.sellable_capabilities
+    assert "Role" not in p.sellable_capabilities
+    assert "Personality" not in p.sellable_capabilities
+
+
+def test_recruitment_specialist_not_identity_labels():
+    path = ROOT / "ingest/snapshot/specialized/recruitment-specialist.md"
+    p = convert_to_helloagents(path)
+    bad = {"Role", "Personality", "Memory", "Experience"}
+    assert not bad.intersection(p.sellable_capabilities), p.sellable_capabilities
+
+
+def test_api_platform_engineer_no_brace_caps():
+    path = ROOT / "ingest/snapshot/engineering/engineering-api-platform-engineer.md"
+    p = convert_to_helloagents(path)
+    assert not any(c.startswith("{") for c in p.sellable_capabilities), p.sellable_capabilities
+    assert p.sellable_capabilities

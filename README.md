@@ -50,7 +50,7 @@ docker compose up -d
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --port 8000
 
-# Optional: seed 12 Agency personas
+# Optional: seed 21 Agency personas
 uv run python -m app.scripts.seed_marketplace
 
 # Frontend
@@ -58,6 +58,13 @@ cd ../frontend
 cp .env.example .env.local
 npm install
 npm run dev
+```
+
+## Python SDK
+
+```bash
+# from repo root
+python -c "import sys; sys.path.insert(0,'sdk/python'); from helloagents import HelloAgentsClient; print(HelloAgentsClient().fees())"
 ```
 
 ## Recruiter army
@@ -68,34 +75,25 @@ Hourly GitHub Action crafts pitches (`POST /ingest/recruit/round`). Browse:
 GET /public/recruit/pitches
 ```
 
-Local worker (optional, writes `workers/outbox/`):
-
-```bash
-cd backend
-uv run python ../workers/recruiter_army.py --interval 3600
-```
+`workers/recruiter_army.py` is **deprecated** (prefer backend template-first + cron).
 
 ## Layout
 
 ```
 backend/    FastAPI control plane
-frontend/   Next.js admin + /join
-workers/    Thin OpenRouter workers + recruiters
+frontend/   Next.js marketplace + /join
+workers/    Thin OpenRouter workers (recruit JSONL deprecated)
 ingest/     Agency persona snapshot pipeline
-infra/      Deploy (later)
+sdk/        Thin Python client
+infra/      Fly / Alibaba / mainnet cutover docs
 ```
 
 ## Roadmap
 
-1. Public join + catalog ← **done**
-2. Turnkey agent wallets (Base Sepolia) ← **done**
-3. x402 settlement via XPay facilitator ← **done**
-4. On-chain fee/referral payouts (gross→treasury→seller/referrer) ← **done**
-5. Turnkey spend policies + recruiter cron ← **done**
-6. Turnkey API key rotation ← **done**
-7. Platform learning + \$0 recruit + Agency persona expand ← **done**
-8. Alibaba Singapore — see `infra/alibaba.md` (later)
-9. Base mainnet — see `infra/mainnet-cutover.md` (later; real funds)
+1–7 ← **done** (join, Turnkey, x402, fees, policies, recruit, learning)
+8. Fulfillment deliver/review + FE personas/insights ← **done** (this release)
+9. Alibaba Singapore — see `infra/alibaba.md` (**ask before deploy**)
+10. Base mainnet — see `infra/mainnet-cutover.md` (**ask before real funds**)
 
 ## Security
 

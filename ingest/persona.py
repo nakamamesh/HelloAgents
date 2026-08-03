@@ -37,12 +37,36 @@ HELLOAGENTS_TOOLS = [
 
 
 SECTION_ALIASES = {
-    "identity": ("identity", "identity & role definition", "identity and role"),
-    "mission": ("mission", "core mission", "purpose"),
+    "identity": ("identity", "identity & role definition", "identity and role", "your identity"),
+    "mission": ("core mission", "mission", "purpose"),
     "workflow": ("workflow", "operating workflow", "process", "decision framework"),
-    "deliverables": ("deliverables", "outputs", "core capabilities"),
-    "success_metrics": ("success metrics", "success criteria", "metrics"),
+    "deliverables": ("core capabilities", "deliverables", "outputs", "what you deliver"),
+    "success_metrics": ("success metrics", "success criteria", "metrics", "kpis"),
 }
+
+# Identity schema labels — not sellable skills
+_IDENTITY_LABELS = frozenset(
+    {
+        "role",
+        "personality",
+        "memory",
+        "experience",
+        "style",
+        "tone",
+        "voice",
+        "background",
+        "identity",
+        "name",
+        "title",
+    }
+)
+
+# Noise from OpenAPI / JSON / code fences mistakenly treated as bullets
+_CAP_REJECT = re.compile(
+    r"^(\{|\[|\}|\]|name|in|type|schema|required|properties|description|"
+    r"parameters|items|enum|default|example|format|\$ref)",
+    re.I,
+)
 
 
 @dataclass
@@ -84,6 +108,11 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     return meta, body
 
 
+def _strip_fenced_code(text: str) -> str:
+    """Drop ```...``` blocks so OpenAPI/YAML samples don't become capabilities."""
+    return re.sub(r"```.*?```", "\n", text, flags=re.S)
+
+
 def _split_sections(body: str) -> dict[str, str]:
     sections: dict[str, str] = {}
     current: str | None = None
@@ -115,17 +144,115 @@ def _slugify(name: str) -> str:
     return s.strip("-")
 
 
-def _capabilities_from_text(text: str | None) -> list[str]:
+def _clean_cap(raw: str) -> str | None:
+    label = raw.strip().strip("*").strip("`").strip()
+    label = re.sub(r"\s+", " ", label)
+    if not label or len(label) < 2:
+        return None
+    # Drop "- **Role**: full text" → prefer the value after colon when label is identity
+    if ":" in label:
+        head, tail = label.split(":", 1)
+        head_l = head.strip().lower()
+        if head_l in _IDENTITY_LABELS:
+            # Use value only if it looks like a skill phrase (not a long bio)
+            val = tail.strip()
+            if 3 <= len(val) <= 80 and not val.lower().startswith("you "):
+                # Prefer noun-phrase slice before first comma for long roles
+                label = val.split(",")[0].strip()
+            else:
+                return None
+        else:
+            label = head.strip()
+    low = label.lower()
+    if low in _IDENTITY_LABELS:
+        return None
+    if _CAP_REJECT.match(label):
+        return None
+    if label.startswith("{") or label.startswith("["):
+        return None
+    if len(label) > 80:
+        label = label[:80].rstrip()
+    return label
+
+
+def _capabilities_from_text(text: str | None, *, allow_identity_fallback: bool = False) -> list[str]:
     if not text:
         return []
+    text = _strip_fenced_code(text)
     caps: list[str] = []
+    seen: set[str] = set()
     for line in text.splitlines():
-        m = re.match(r"^[-*]\s+\*?\*?([^*\n:]+)", line.strip())
-        if m:
-            caps.append(m.group(1).strip()[:120])
+        stripped = line.strip()
+        # Only top-level markdown bullets (indent < 4) — skip nested OpenAPI lists
+        if line[:1].isspace() and (len(line) - len(line.lstrip(" "))) >= 4:
+            continue
+        # Prefer **Label** bullets first (Agency style)
+        m2 = re.match(r"^[-*]\s+\*\*([^*]+)\*\*", stripped)
+        if m2:
+            cand = _clean_cap(m2.group(1))
+        else:
+            m = re.match(
+                r"^[-*]\s+(?:\*\*|__)?(.+?)(?:\*\*|__)?(?:\s*[—\-–:].*)?$",
+                stripped,
+            )
+            if not m:
+                continue
+            cand = _clean_cap(m.group(1))
+        if not cand:
+            continue
+        if not allow_identity_fallback and cand.lower() in _IDENTITY_LABELS:
+            continue
+        key = cand.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        caps.append(cand[:80])
         if len(caps) >= 8:
             break
     return caps
+
+
+def _bold_labels(text: str | None) -> list[str]:
+    """Extract **Label** markers from mission/body (Agency channel & skill headings)."""
+    if not text:
+        return []
+    text = _strip_fenced_code(text)
+    caps: list[str] = []
+    seen: set[str] = set()
+    for m in re.finditer(r"\*\*([^*]{2,60})\*\*", text):
+        cand = _clean_cap(m.group(1))
+        if not cand or cand.lower() in _IDENTITY_LABELS:
+            continue
+        # Skip section headings that are verbs-only noise if too short alone
+        key = cand.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        caps.append(cand[:80])
+        if len(caps) >= 8:
+            break
+    return caps
+
+
+def _capabilities_from_mission(mission: str | None) -> list[str]:
+    """Last-resort noun phrases from mission (no Role/Personality junk)."""
+    if not mission:
+        return []
+    # Pull Title Case or quoted skill-like fragments
+    bits = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\b", mission)
+    out: list[str] = []
+    seen: set[str] = set()
+    for b in bits:
+        low = b.lower()
+        if low in _IDENTITY_LABELS or len(b) < 4:
+            continue
+        if low in seen:
+            continue
+        seen.add(low)
+        out.append(b)
+        if len(out) >= 4:
+            break
+    return out
 
 
 def convert_to_helloagents(
@@ -146,7 +273,16 @@ def convert_to_helloagents(
     workflow = _pick_section(sections, SECTION_ALIASES["workflow"])
     deliverables = _pick_section(sections, SECTION_ALIASES["deliverables"])
     success_metrics = _pick_section(sections, SECTION_ALIASES["success_metrics"])
-    caps = _capabilities_from_text(deliverables) or _capabilities_from_text(identity)
+
+    caps = (
+        _capabilities_from_text(deliverables)
+        or _bold_labels(mission)
+        or _bold_labels(workflow)
+        or _capabilities_from_text(workflow)
+        or _capabilities_from_mission(mission)
+        or _capabilities_from_text(description)
+        or ([div.replace("-", " ").title()] if div else [])
+    )
 
     catalog = [
         {
@@ -164,7 +300,25 @@ def convert_to_helloagents(
         "success_metrics": success_metrics,
         "tools": HELLOAGENTS_TOOLS,
         "roles": ["seller", "publisher", "buyer"],
+        "skills": [
+            {
+                "id": _slugify(c) or f"skill-{i}",
+                "name": c,
+                "description": c,
+                "tags": [div] if div else [],
+                "inputModes": ["text", "application/json"],
+                "outputModes": ["text", "application/json"],
+            }
+            for i, c in enumerate(caps[:8])
+        ],
     }
+
+    # Relative path under snapshot/ when possible
+    source = str(path).replace("\\", "/")
+    for marker in ("/snapshot/", "snapshot/"):
+        if marker in source:
+            source = source.split(marker, 1)[1]
+            break
 
     return Persona(
         name=name,
@@ -177,7 +331,7 @@ def convert_to_helloagents(
         workflow=workflow,
         deliverables=deliverables,
         success_metrics=success_metrics,
-        source_path=str(path).replace("\\", "/"),
+        source_path=source,
         sellable_capabilities=caps,
         catalog_products=catalog,
         agent_card=agent_card,

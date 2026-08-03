@@ -641,6 +641,9 @@ async def retry_payouts(db: AsyncSession, *, txn_id: uuid.UUID) -> dict[str, Any
             meta = {**meta, "learning": learned}
         except Exception:  # noqa: BLE001
             logger.exception("platform learning record failed on retry")
+        from app.services.fulfillment import mark_awaiting_delivery
+
+        mark_awaiting_delivery(txn)
     else:
         txn.status = TransactionStatus.SETTLED_PENDING_PAYOUT
         status_out = "settled_pending_payout"
@@ -838,6 +841,20 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
             "payouts": payouts,
             "dry_run": True,
         }
+        try:
+            from app.services import reputation as rep_svc
+            from app.services import learning as learn_svc
+
+            txn.meta = {
+                **(txn.meta or {}),
+                "reputation": await rep_svc.apply_settlement_reputation(db, txn=txn),
+                "learning": await learn_svc.record_settlement_outcome(db, txn=txn),
+            }
+        except Exception:  # noqa: BLE001
+            logger.exception("dry-run reputation/learning failed")
+        from app.services.fulfillment import mark_awaiting_delivery
+
+        mark_awaiting_delivery(txn)
         await db.commit()
         await db.refresh(txn)
         return {
@@ -965,6 +982,9 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
                 txn.meta = {**(txn.meta or {}), "learning": learned}
             except Exception:  # noqa: BLE001
                 logger.exception("platform learning record failed")
+            from app.services.fulfillment import mark_awaiting_delivery
+
+            mark_awaiting_delivery(txn)
         else:
             txn.status = TransactionStatus.SETTLED_PENDING_PAYOUT
             status_out = "settled_pending_payout"

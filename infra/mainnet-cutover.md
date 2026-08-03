@@ -19,8 +19,11 @@ fly secrets set WALLET_NETWORK=base -a helloagents-api
 - [ ] Disable faucet wording; set `SETTLEMENT_DRY_RUN=false`
 - [ ] Fresh agents or wallet backfill on mainnet addresses (Sepolia keys ≠ mainnet funds)
 - [ ] Small smoke buy (≤ \$1) then review treasuries
+- [ ] Re-run `POST /ingest/wallets/policies` + `/ingest/wallets/policies/audit` (0 risks)
+- [ ] `GET /ingest/wallets/treasury` shows ETH ≥ `TREASURY_MIN_ETH`
+- [ ] Smoke: buy → pay → deliver → review on ≤ \$1 listing
+- [ ] Confirm rate limits + recruit cron still healthy on mainnet
 
-## Do not
+## Status
 
-- Flip mainnet without Turnkey dashboard scrub.
-- Reuse Sepolia-funded addresses expecting mainnet balances.
+**Not live.** Do not flip `WALLET_NETWORK=base` without explicit operator approval.

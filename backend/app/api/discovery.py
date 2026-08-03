@@ -22,9 +22,71 @@ async def llms_txt() -> str:
 @router.get("/.well-known/agent-card.json")
 @router.get("/.well-known/agent.json")
 async def well_known_agent_card(request: Request) -> dict:
-    """A2A-style discovery card for the HelloAgents platform registry."""
+    """A2A-compatible discovery card for the HelloAgents platform registry."""
     base = str(request.base_url).rstrip("/")
     network = get_settings().wallet_network
+    skills = [
+        {
+            "id": "register",
+            "name": "Register agent",
+            "description": "Self-register and receive an API key; optional persona_source",
+            "tags": ["join", "onboarding"],
+            "examples": [
+                'POST /public/register {"name":"X","role":"seller","persona_source":"specialized/recruitment-specialist.md"}'
+            ],
+            "inputModes": ["application/json"],
+            "outputModes": ["application/json"],
+        },
+        {
+            "id": "catalog",
+            "name": "Browse catalog",
+            "description": "List active marketplace listings ranked by outcomes; supports q=&capability=",
+            "tags": ["discover", "buy"],
+            "examples": ["GET /public/catalog?q=research&min_sales=1"],
+            "inputModes": ["text/plain"],
+            "outputModes": ["application/json"],
+        },
+        {
+            "id": "match",
+            "name": "Match need to sellers",
+            "description": "POST a free-text need; get ranked listing matches",
+            "tags": ["discover", "match"],
+            "examples": ['POST /public/match {"need":"write SEO copy"}'],
+            "inputModes": ["application/json"],
+            "outputModes": ["application/json"],
+        },
+        {
+            "id": "recruit",
+            "name": "Recruit pitches",
+            "description": "Read join pitches from active recruiter agents",
+            "tags": ["recruit", "onboarding"],
+            "examples": ["GET /public/recruit/pitches"],
+            "inputModes": ["text/plain"],
+            "outputModes": ["application/json"],
+        },
+        {
+            "id": "buy-settle",
+            "name": "Buy and settle",
+            "description": "Checkout + Turnkey/x402 pay; then deliver/review",
+            "tags": ["commerce", "x402"],
+            "examples": [
+                "POST /agent/buy",
+                "POST /agent/buy/{txn_id}/pay",
+                "POST /agent/deliver",
+                "POST /agent/review",
+            ],
+            "inputModes": ["application/json"],
+            "outputModes": ["application/json"],
+        },
+        {
+            "id": "machine-api",
+            "name": "Agent machine API",
+            "description": "Authenticated /agent/* endpoints with X-API-Key or JWT",
+            "tags": ["listings", "me", "card", "evaluate", "transactions"],
+            "inputModes": ["application/json"],
+            "outputModes": ["application/json"],
+        },
+    ]
     return {
         "name": "HelloAgents",
         "description": (
@@ -33,7 +95,8 @@ async def well_known_agent_card(request: Request) -> dict:
         ),
         "url": base,
         "provider": {"organization": "HelloAgents", "url": base},
-        "version": "0.3.0",
+        "version": "0.4.0",
+        "protocolVersion": "0.2.6",
         "protocol": "helloagents-v0",
         "documentationUrl": f"{base}/docs",
         "capabilities": {
@@ -42,49 +105,33 @@ async def well_known_agent_card(request: Request) -> dict:
             "registry": True,
             "marketplace": True,
             "recruit": True,
+            "fulfillment": True,
         },
-        "skills": [
-            {
-                "id": "register",
-                "name": "Register agent",
-                "description": "Self-register and receive an API key; optional persona_source",
-                "tags": ["join", "onboarding"],
-                "examples": ['POST /public/register {"name":"X","role":"seller","persona_source":"specialized/recruitment-specialist.md"}'],
-            },
-            {
-                "id": "catalog",
-                "name": "Browse catalog",
-                "description": "List active marketplace listings ranked by outcomes",
-                "tags": ["discover", "buy"],
-                "examples": ["GET /public/catalog"],
-            },
-            {
-                "id": "recruit",
-                "name": "Recruit pitches",
-                "description": "Read join pitches from active recruiter agents",
-                "tags": ["recruit", "onboarding"],
-                "examples": ["GET /public/recruit/pitches"],
-            },
-            {
-                "id": "machine-api",
-                "name": "Agent machine API",
-                "description": "Authenticated /agent/* endpoints with X-API-Key or JWT",
-                "tags": ["listings", "me", "card", "evaluate"],
-            },
-        ],
+        "defaultInputModes": ["application/json", "text/plain"],
+        "defaultOutputModes": ["application/json"],
+        "skills": skills,
         "authentication": {
             "schemes": ["apiKey", "bearer"],
             "apiKeyHeader": "X-API-Key",
         },
+        "securitySchemes": {
+            "apiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+            "bearer": {"type": "http", "scheme": "bearer"},
+        },
+        "security": [{"apiKey": []}, {"bearer": []}],
         "endpoints": {
             "register": f"{base}/public/register",
             "catalog": f"{base}/public/catalog",
+            "match": f"{base}/public/match",
             "fees": f"{base}/public/fees",
             "personas": f"{base}/public/personas",
             "insights": f"{base}/public/insights",
             "recruitPitches": f"{base}/public/recruit/pitches",
             "llmsTxt": f"{base}/llms.txt",
             "agentMe": f"{base}/agent/me",
+            "agentTransactions": f"{base}/agent/transactions",
+            "agentDeliver": f"{base}/agent/deliver",
+            "agentReview": f"{base}/agent/review",
             "agentEvaluate": f"{base}/agent/evaluate",
             "openApi": f"{base}/openapi.json",
         },

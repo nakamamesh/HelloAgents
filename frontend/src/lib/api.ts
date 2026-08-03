@@ -25,12 +25,47 @@ export type Listing = {
 export type CatalogItem = {
   listing_id: string;
   title: string;
+  description?: string;
   price_usdc: string;
   capabilities: string[];
   agent_slug: string;
   agent_name: string;
   agent_role: string;
   referral_code?: string;
+  rank_score?: number;
+  completed_sales?: number;
+  reputation_score?: string;
+};
+
+export type Persona = {
+  source_path: string;
+  name: string;
+  division: string | null;
+  description: string;
+  sellable_capabilities: string[];
+};
+
+export type Insights = {
+  completed_transactions: number;
+  total_gmv_usdc: string;
+  top_capabilities: { capability: string; sales: number; gmv: number }[];
+  listing_templates: {
+    title_pattern: string;
+    price_usdc: string;
+    capabilities: string[];
+    completed_sales: number;
+    seller_slug: string;
+  }[];
+  fee_note?: string;
+};
+
+export type RecruitPitch = {
+  id: string;
+  recruiter_slug: string;
+  referral_code: string;
+  pitch: string;
+  created_at: string | null;
+  join_hint?: string;
 };
 
 export type Fees = {
@@ -38,6 +73,17 @@ export type Fees = {
   referral_bps: number;
   platform_fee_pct: number;
   referral_pct: number;
+};
+
+export type AgentCard = {
+  name: string;
+  slug: string;
+  description: string | null;
+  role: string;
+  referral_code: string | null;
+  reputation_score: string;
+  badges: { badge_code: string; awarded_at: string | null }[];
+  sellable_capabilities?: string[];
 };
 
 function backendBase() {
@@ -65,10 +111,30 @@ export function fetchListings() {
   return api<Listing[]>("listings");
 }
 
-export function fetchCatalog() {
-  return api<CatalogItem[]>("public/catalog", false);
+export function fetchCatalog(params?: { q?: string; capability?: string }) {
+  const sp = new URLSearchParams();
+  if (params?.q) sp.set("q", params.q);
+  if (params?.capability) sp.set("capability", params.capability);
+  const qs = sp.toString();
+  return api<CatalogItem[]>(`public/catalog${qs ? `?${qs}` : ""}`, false);
 }
 
 export function fetchFees() {
   return api<Fees>("public/fees", false);
+}
+
+export function fetchPersonas() {
+  return api<{ count: number; personas: Persona[] }>("public/personas", false);
+}
+
+export function fetchInsights() {
+  return api<Insights>("public/insights", false);
+}
+
+export function fetchRecruitPitches() {
+  return api<{ pitches: RecruitPitch[] }>("public/recruit/pitches", false);
+}
+
+export function fetchAgentCard(slug: string) {
+  return api<AgentCard>(`public/agents/${encodeURIComponent(slug)}/card`, false);
 }

@@ -237,6 +237,10 @@ async def public_register(
 @router.get("/catalog")
 async def public_catalog(
     limit: int = Query(default=50, ge=1, le=200),
+    q: str | None = Query(default=None, max_length=200),
+    capability: str | None = Query(default=None, max_length=120),
+    min_sales: int = Query(default=0, ge=0, le=1_000_000),
+    agent_slug: str | None = Query(default=None, max_length=128),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict]:
     from app.services import learning as learn_svc
@@ -248,18 +252,48 @@ async def public_catalog(
     )
     rows = list(result.all())
     scores = await learn_svc.catalog_rank_scores(db)
-    rows.sort(
+
+    q_l = (q or "").strip().lower()
+    cap_l = (capability or "").strip().lower()
+    slug_l = (agent_slug or "").strip().lower()
+
+    filtered: list[tuple[Listing, Agent]] = []
+    for listing, agent in rows:
+        sales = int((listing.meta or {}).get("completed_sales") or 0)
+        if sales < min_sales:
+            continue
+        if slug_l and agent.slug.lower() != slug_l:
+            continue
+        caps = [str(c) for c in (listing.capabilities or [])]
+        if cap_l and not any(cap_l in c.lower() for c in caps):
+            continue
+        if q_l:
+            hay = " ".join(
+                [
+                    listing.title or "",
+                    listing.description or "",
+                    agent.name or "",
+                    agent.slug or "",
+                    " ".join(caps),
+                ]
+            ).lower()
+            if q_l not in hay:
+                continue
+        filtered.append((listing, agent))
+
+    filtered.sort(
         key=lambda pair: (
             scores.get(str(pair[0].id), 0.0),
             pair[0].created_at.timestamp() if pair[0].created_at else 0,
         ),
         reverse=True,
     )
-    rows = rows[:limit]
+    filtered = filtered[:limit]
     return [
         {
             "listing_id": str(listing.id),
             "title": listing.title,
+            "description": (listing.description or "")[:280],
             "price_usdc": str(listing.price_usdc),
             "capabilities": listing.capabilities,
             "agent_slug": agent.slug,
@@ -268,9 +302,34 @@ async def public_catalog(
             "referral_code": agent.referral_code,
             "rank_score": scores.get(str(listing.id), 0.0),
             "completed_sales": int((listing.meta or {}).get("completed_sales") or 0),
+            "reputation_score": str(agent.reputation_score),
         }
-        for listing, agent in rows
+        for listing, agent in filtered
     ]
+
+
+@router.post("/match")
+async def public_match(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Rank sellers for a free-text need (capability overlap + outcomes)."""
+    need = str(body.get("need") or body.get("query") or "").strip()
+    limit = min(int(body.get("limit") or 10), 50)
+    if len(need) < 2:
+        raise HTTPException(status_code=400, detail="need required")
+    tokens = {t.lower() for t in re.findall(r"[a-zA-Z0-9\-]{3,}", need)}
+    catalog = await public_catalog(limit=200, q=None, capability=None, min_sales=0, agent_slug=None, db=db)
+    scored: list[dict] = []
+    for item in catalog:
+        caps = [str(c).lower() for c in (item.get("capabilities") or [])]
+        title = (item.get("title") or "").lower()
+        overlap = sum(1 for t in tokens if t in title or any(t in c for c in caps))
+        rank = float(item.get("rank_score") or 0)
+        score = overlap * 20 + rank
+        scored.append({**item, "match_score": score, "token_overlap": overlap})
+    scored.sort(key=lambda x: (x["match_score"], x.get("rank_score") or 0), reverse=True)
+    return {"need": need, "matches": scored[:limit]}
 
 
 @router.get("/insights")

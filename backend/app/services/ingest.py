@@ -67,8 +67,19 @@ async def sync_personas(db: AsyncSession) -> dict:
         )
         row = existing.scalar_one_or_none()
         if row is not None:
+            # Refresh parseable fields in place (capability extractor improves without new commit)
+            row.sellable_capabilities = persona.sellable_capabilities
+            row.catalog_products = persona.catalog_products
+            row.agent_card = persona.agent_card
+            row.identity = persona.identity
+            row.mission = persona.mission
+            row.workflow = persona.workflow
+            row.deliverables = persona.deliverables
+            row.success_metrics = persona.success_metrics
             if row.agent_card.get("tools") != persona.agent_card.get("tools"):
                 conflicts.append(source_path)
+            changed.append(source_path)
+            versions.append(row)
             continue
 
         prior = await db.execute(
@@ -205,6 +216,41 @@ async def seed_marketplace(db: AsyncSession) -> dict:
         "api_keys": api_keys,
         "note": "wallets provisioned when Turnkey secrets are set; settlement via x402 + treasury disperse",
     }
+
+
+async def refresh_listing_capabilities(db: AsyncSession) -> dict:
+    """Push latest persona.sellable_capabilities onto bootstrap listings."""
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    updated: list[dict] = []
+    for item in manifest["seed_agents"]:
+        slug = item["slug"]
+        rel = item["path"]
+        agent_res = await db.execute(select(Agent).where(Agent.slug == slug))
+        agent = agent_res.scalar_one_or_none()
+        if agent is None:
+            continue
+        pv = await db.execute(
+            select(PersonaVersion)
+            .where(PersonaVersion.source_path == rel)
+            .order_by(PersonaVersion.created_at.desc())
+            .limit(1)
+        )
+        persona = pv.scalar_one_or_none()
+        if persona is None:
+            continue
+        caps = (persona.sellable_capabilities or [])[:4]
+        listings = await db.execute(
+            select(Listing).where(
+                Listing.agent_id == agent.id,
+                Listing.status == ListingStatus.ACTIVE,
+            )
+        )
+        for listing in listings.scalars().all():
+            if (listing.meta or {}).get("bootstrap"):
+                listing.capabilities = caps
+                updated.append({"slug": slug, "listing_id": str(listing.id), "capabilities": caps})
+    await db.commit()
+    return {"updated": updated, "count": len(updated)}
 
 
 async def get_persona_for_agent(db: AsyncSession, agent_id: UUID) -> PersonaVersion | None:

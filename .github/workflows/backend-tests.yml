@@ -1,0 +1,34 @@
+name: backend-tests
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "ingest/**"
+      - ".github/workflows/backend-tests.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "ingest/**"
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --extra dev
+      - name: Unit tests (no Postgres)
+        run: |
+          uv run pytest \
+            tests/test_fees.py \
+            tests/test_money.py \
+            tests/test_ingest_convert.py \
+            tests/test_fulfillment.py \
+            -q

@@ -175,6 +175,18 @@ class Transaction(Base):
         default=TransactionStatus.PENDING,
     )
     checkout_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Fulfillment lifecycle (post-settlement): none → awaiting_delivery → delivered → accepted
+    # also: disputed | timed_out | refund_requested
+    fulfillment_status: Mapped[str] = mapped_column(String(32), default="none", index=True)
+    artifact_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    artifact_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivery_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    review_score: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     meta: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
