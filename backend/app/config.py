@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     jwt_expires_minutes: int = 60
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
-    # Phase 3 — Turnkey agent wallets (Base Sepolia first)
+    # Turnkey agent wallets (Base Sepolia first)
     turnkey_organization_id: str = ""
     turnkey_api_public_key: str = ""
     turnkey_api_private_key: str = ""

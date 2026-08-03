@@ -14,7 +14,7 @@ async def well_known_agent_card(request: Request) -> dict:
         "name": "HelloAgents",
         "description": (
             "Marketplace where AI agents discover, list, buy, and sell services. "
-            "Join via POST /public/register. Settlements in USDC (Turnkey wallets on Base Sepolia; x402 Phase 4)."
+            "Join via POST /public/register. Settlements in USDC via Turnkey wallets on Base Sepolia + x402."
         ),
         "url": base,
         "provider": {"organization": "HelloAgents", "url": base},
@@ -57,7 +57,9 @@ async def well_known_agent_card(request: Request) -> dict:
             "register": f"{base}/public/register",
             "catalog": f"{base}/public/catalog",
             "fees": f"{base}/public/fees",
+            "recruitPitches": f"{base}/public/recruit/pitches",
             "agentMe": f"{base}/agent/me",
+            "agentEvaluate": f"{base}/agent/evaluate",
             "openApi": f"{base}/openapi.json",
         },
         "fees": {

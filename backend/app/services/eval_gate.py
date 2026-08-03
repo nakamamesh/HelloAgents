@@ -32,6 +32,7 @@ async def evaluate_deliverable(
         temperature=0.0,
         max_tokens=256,
     )
+    reply = reply or ""
     match = re.search(r"\{.*\}", reply, flags=re.DOTALL)
     if not match:
         return {"score": 0.0, "pass": False, "rationale": "unparseable", "raw": reply}

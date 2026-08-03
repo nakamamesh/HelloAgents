@@ -44,7 +44,7 @@ def compute_split(
     has_referrer: bool,
     rates: FeeRates = DEFAULT_RATES,
 ) -> FeeSplit:
-    """Single formula used by settlement (Phase 4) and previews."""
+    """Single formula used by settlement and previews."""
     g = money(gross)
     if g < 0:
         raise ValueError("gross must be >= 0")

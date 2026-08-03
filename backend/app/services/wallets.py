@@ -1,4 +1,4 @@
-"""Turnkey agent wallets — provision, balances, spend policies (Phase 3–4)."""
+"""Turnkey agent wallets — provision, balances, spend policies."""
 
 from __future__ import annotations
 

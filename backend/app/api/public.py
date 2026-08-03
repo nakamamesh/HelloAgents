@@ -224,6 +224,33 @@ async def public_catalog(
     ]
 
 
+@router.get("/recruit/pitches")
+async def public_recruit_pitches(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Public feed of recruiter pitches (for agents browsing join offers)."""
+    from app.models.recruit import RecruitPitch
+
+    result = await db.execute(
+        select(RecruitPitch).order_by(RecruitPitch.created_at.desc()).limit(limit)
+    )
+    rows = list(result.scalars().all())
+    return {
+        "pitches": [
+            {
+                "id": str(r.id),
+                "recruiter_slug": r.recruiter_slug,
+                "referral_code": r.referral_code,
+                "pitch": r.pitch,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "join_hint": f"POST /public/register with referral_code={r.referral_code}",
+            }
+            for r in rows
+        ]
+    }
+
+
 @router.get("/agents/{slug}/card")
 async def public_agent_card(slug: str, db: AsyncSession = Depends(get_db)) -> dict:
     result = await db.execute(select(Agent).where(Agent.slug == slug))
@@ -236,6 +263,7 @@ async def public_agent_card(slug: str, db: AsyncSession = Depends(get_db)) -> di
         "description": agent.description,
         "role": agent.role.value,
         "referral_code": agent.referral_code,
+        "reputation_score": str(agent.reputation_score),
         "skills": (agent.meta or {}).get("skills", []),
         "join_url_hint": f"/public/register with referral_code={agent.referral_code}",
         "protocol": "helloagents-v0",
@@ -247,4 +275,7 @@ async def public_agent_card(slug: str, db: AsyncSession = Depends(get_db)) -> di
         if persona:
             card["agent_card"] = persona.agent_card
             card["sellable_capabilities"] = persona.sellable_capabilities
+    from app.services import reputation as rep_svc
+
+    card["badges"] = await rep_svc.list_badges(db, agent_id=agent.id)
     return card

@@ -76,7 +76,15 @@ async def agent_completion(
         max_tokens=max_tokens,
     )
     try:
-        return data["choices"][0]["message"]["content"]
+        message = data["choices"][0]["message"]
+        content = message.get("content")
+        if content is None:
+            # some models return null content with reasoning / tool fields
+            content = message.get("reasoning") or message.get("refusal") or ""
+        text = str(content).strip()
+        if not text:
+            raise OpenRouterError(f"Empty model content: {data!r}")
+        return text
     except (KeyError, IndexError, TypeError) as exc:
         raise OpenRouterError(f"Unexpected response shape: {data!r}") from exc
 

@@ -112,6 +112,11 @@ class BuyRequest(BaseModel):
     idempotency_key: str = Field(..., min_length=8, max_length=128)
 
 
+class EvaluateRequest(BaseModel):
+    task: str = Field(..., min_length=1, max_length=4000)
+    deliverable: str = Field(..., min_length=1, max_length=50000)
+
+
 @router.post("/buy")
 async def buy_listing(
     body: BuyRequest,
@@ -159,3 +164,62 @@ async def pay_checkout(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@router.post("/evaluate")
+async def evaluate_deliverable(
+    body: EvaluateRequest,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Score a deliverable against persona success_metrics; on pass bump reputation + evolve meta."""
+    from fastapi import HTTPException, status
+
+    from app.models.orm import PersonaVersion
+    from app.services import eval_gate, reputation as rep_svc
+    from app.services.openrouter import OpenRouterError
+
+    metrics = None
+    if agent.persona_version_id:
+        persona = await db.get(PersonaVersion, agent.persona_version_id)
+        if persona:
+            metrics = persona.success_metrics
+    try:
+        result = await eval_gate.evaluate_deliverable(
+            success_metrics=metrics,
+            deliverable=body.deliverable,
+            task=body.task,
+        )
+    except OpenRouterError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+        ) from exc
+    improve = None
+    if result.get("pass"):
+        improve = await rep_svc.apply_eval_pass(
+            db, agent=agent, score=float(result.get("score") or 0), task=body.task
+        )
+        await db.commit()
+        await db.refresh(agent)
+    return {
+        "agent_id": str(agent.id),
+        "slug": agent.slug,
+        "eval": result,
+        "self_improve": improve,
+        "reputation_score": str(agent.reputation_score),
+    }
+
+
+@router.get("/badges")
+async def my_badges(
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services import reputation as rep_svc
+
+    return {
+        "agent_id": str(agent.id),
+        "slug": agent.slug,
+        "reputation_score": str(agent.reputation_score),
+        "badges": await rep_svc.list_badges(db, agent_id=agent.id),
+    }

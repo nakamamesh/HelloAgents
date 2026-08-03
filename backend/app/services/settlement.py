@@ -1,4 +1,4 @@
-"""Phase 4 settlement — checkout + x402 via XPay facilitator (no Coinbase)."""
+"""Settlement — checkout + x402 via XPay facilitator (no Coinbase)."""
 
 from __future__ import annotations
 
@@ -627,6 +627,13 @@ async def retry_payouts(db: AsyncSession, *, txn_id: uuid.UUID) -> dict[str, Any
         txn.status = TransactionStatus.COMPLETED
         txn.completed_at = txn.completed_at or datetime.now(timezone.utc)
         status_out = "completed"
+        try:
+            from app.services import reputation as rep_svc
+
+            rep = await rep_svc.apply_settlement_reputation(db, txn=txn)
+            meta = {**meta, "reputation": rep}
+        except Exception:  # noqa: BLE001
+            logger.exception("reputation apply failed on retry")
     else:
         txn.status = TransactionStatus.SETTLED_PENDING_PAYOUT
         status_out = "settled_pending_payout"
@@ -937,6 +944,13 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
             txn.status = TransactionStatus.COMPLETED
             txn.completed_at = datetime.now(timezone.utc)
             status_out = "completed"
+            try:
+                from app.services import reputation as rep_svc
+
+                rep = await rep_svc.apply_settlement_reputation(db, txn=txn)
+                txn.meta = {**(txn.meta or {}), "reputation": rep}
+            except Exception:  # noqa: BLE001
+                logger.exception("reputation apply failed")
         else:
             txn.status = TransactionStatus.SETTLED_PENDING_PAYOUT
             status_out = "settled_pending_payout"

@@ -20,7 +20,7 @@ HELLOAGENTS_TOOLS = [
     },
     {
         "name": "buy",
-        "description": "Purchase a listing (settlement wired in Phase 4)",
+        "description": "Purchase a listing (USDC on Base via Turnkey + x402)",
         "parameters": {"listing_id": "uuid", "idempotency_key": "string"},
     },
     {

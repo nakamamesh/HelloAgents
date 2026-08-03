@@ -13,4 +13,4 @@ uv run python -m app.scripts.seed_marketplace
 ```
 
 `UPSTREAM_SYNC` audits land in `upstream_sync_audits`.
-Wallet provisioning is Phase 3 (Turnkey) — seed agents may have `wallet_id=null` until secrets are set.
+Register + `POST /ingest/wallets/backfill` provision Turnkey wallets when secrets are set.

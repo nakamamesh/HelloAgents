@@ -148,7 +148,7 @@ class Listing(Base):
 
 
 class Transaction(Base):
-    """Single source of truth for fee + referral splits (Phase 4 settlement)."""
+    """Single source of truth for fee + referral splits at settlement."""
 
     __tablename__ = "transactions"
 
@@ -178,3 +178,20 @@ class Transaction(Base):
     meta: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AgentBadge(Base):
+    """Simple digital badges awarded from settlements / eval gate."""
+
+    __tablename__ = "agent_badges"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "badge_code", name="uq_agent_badge_code"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agents.id"), index=True
+    )
+    badge_code: Mapped[str] = mapped_column(String(64), index=True)
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)
+    awarded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

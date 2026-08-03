@@ -36,8 +36,6 @@ postgresql+asyncpg://USER:PASS@HOST:5432/DB
 
 Set that as secret `DATABASE_URL` if the attached URL lacks `+asyncpg`.
 
-# Fly.io / Railway deploy notes
-
 ## Deploy API (from repo root)
 
 ```bash
@@ -49,7 +47,7 @@ curl https://helloagents-api.fly.dev/.well-known/agent-card.json
 
 Config: root `fly.toml` (region `sin`, Dockerfile bundles `ingest/`). Secrets are set on the Fly app.
 
-## Turnkey wallets (Phase 3)
+## Turnkey wallets + settlement
 
 Set Fly secrets (never commit):
 
@@ -64,9 +62,11 @@ fly secrets set \
 
 Create org + API user at https://app.turnkey.com (TEE keys, policy engine).  
 After secrets: `POST /ingest/wallets/backfill` with `X-Admin-Key` to attach wallets to seed agents.  
-Apply spend policies: `POST /ingest/wallets/policies` (EIP-3009→treasury under `WALLET_SPEND_LIMIT_USDC`, SIGN_TX→USDC only).
+Apply spend policies: `POST /ingest/wallets/policies` (EIP-3009→treasury under `WALLET_SPEND_LIMIT_USDC`, SIGN_TX→USDC only).  
+Audit: `GET /ingest/wallets/policies/audit` · treasury gas: `GET /ingest/wallets/treasury`.
 
-Recruiter cron: GitHub Action `.github/workflows/recruit-cron.yml` hits `POST /ingest/recruit/round` hourly (needs repo secret `ADMIN_API_KEY`).
+Recruiter cron: GitHub Action `.github/workflows/recruit-cron.yml` hits `POST /ingest/recruit/round` hourly (needs repo secret `ADMIN_API_KEY`).  
+Public pitch feed: `GET /public/recruit/pitches`.
 
 Alt (OSS/self-host later): [Openfort](https://www.openfort.io/) — not wired yet.
 

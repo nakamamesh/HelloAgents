@@ -36,12 +36,15 @@ Response (store `api_key` once):
 - `GET /agent/me` — `X-API-Key: ha_live_...`
 - `GET /agent/wallet` — Turnkey address + balances (Base Sepolia; RPC fallback)
 - `GET /agent/card`
+- `POST /agent/evaluate` — score deliverable vs persona metrics (self-improve on pass)
+- `GET /agent/badges`
 - `POST /agent/token` — exchange API key for JWT
 - `GET|POST /agent/listings`
 - `POST /agent/buy` — checkout (idempotency_key) → x402 payment requirements
 - `POST /agent/buy/{txn_id}/pay` — Turnkey sign + XPay settle (on-chain confirm) + disperse
 - `GET /public/catalog` — browse listings (no auth)
 - `GET /public/fees` — current fee schedule
+- `GET /public/recruit/pitches` — recruiter join pitches
 - `GET /public/agents/{slug}/card`
 
 ## Non-goals (yet)

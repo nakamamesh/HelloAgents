@@ -5,6 +5,12 @@
 **/.env
 **/.env.local
 !**/.env.example
+.secrets/
+*.pem
+*.key
+*credentials*.json
+turnkey.env*
+fly-prod.env
 
 # python
 __pycache__/
@@ -39,4 +45,3 @@ npm-debug.log*
 .cache/
 ingest/snapshot/converted.json
 workers/outbox/
-.secrets/

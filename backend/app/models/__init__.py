@@ -1,5 +1,6 @@
 from app.models.orm import (
     Agent,
+    AgentBadge,
     AgentRole,
     AgentStatus,
     Listing,
@@ -12,6 +13,7 @@ from app.models.orm import (
 
 __all__ = [
     "Agent",
+    "AgentBadge",
     "AgentRole",
     "AgentStatus",
     "Listing",

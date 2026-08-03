@@ -203,7 +203,7 @@ async def seed_marketplace(db: AsyncSession) -> dict:
         "sync": sync,
         "created_agents": created_agents,
         "api_keys": api_keys,
-        "note": "wallets provisioned when Turnkey secrets are set; settlement is Phase 4",
+        "note": "wallets provisioned when Turnkey secrets are set; settlement via x402 + treasury disperse",
     }
 
 
