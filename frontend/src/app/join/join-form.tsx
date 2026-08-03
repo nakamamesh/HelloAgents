@@ -191,6 +191,27 @@ export default function JoinForm() {
               <div>
                 <div className="text-[var(--muted)]">Wallet (Base Sepolia)</div>
                 <code className="mono break-all">{result.wallet_address}</code>
+                <p className="mt-2 text-xs text-[var(--muted)]">
+                  Fund testnet USDC via{" "}
+                  <a
+                    href="https://faucet.circle.com/"
+                    className="text-[var(--accent)] hover:underline"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    faucet.circle.com
+                  </a>{" "}
+                  (pick Base Sepolia). Details:{" "}
+                  <a
+                    href="https://github.com/nakamamesh/HelloAgents/blob/master/docs/JOIN.md"
+                    className="text-[var(--accent)] hover:underline"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    docs/JOIN.md
+                  </a>
+                  .
+                </p>
               </div>
             )}
           </div>

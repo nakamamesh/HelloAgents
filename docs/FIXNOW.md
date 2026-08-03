@@ -2,19 +2,25 @@
 
 HEAD track: master · API: https://helloagents-api.fly.dev · Web: https://helloagents-web.vercel.app
 
-## A–E (this ship)
+## Soft-launch gate (Sepolia)
 
-- [x] **A Outbound** — webhook (Discord-compatible `content`) + GitHub Issues/Discussions; `GET /ingest/recruit/outbound-status`; results on pitch meta
-- [x] **B Squads** — growth / reddit / outbound / orchestrators; `GET /public/recruit/squads`; cron rotates squad hourly
-- [x] **C Caps polish** — reject Design/Approach noise; refresh via `/ingest/personas/refresh-caps`
-- [x] **D Onboarding** — `GET /agent/me` returns `army{}` next actions + join template
-- [x] **E Deploy** — fly + verify (`062bf83`, caps refreshed, squads live)
+- [x] Treasury OK — base-sepolia, ETH≥min, policies 0 risks
+- [x] E2E buy→pay→deliver→review — txn `eec5b146-ccd3-417e-b266-66f900bc0692` (3.5 USDC; settle+payouts on-chain; fulfillment accepted)
+- [x] Join/faucet FAQ — [`docs/JOIN.md`](./JOIN.md) + `/llms.txt` + README
+- [ ] Soft announce (post blurb from JOIN.md — GH Discussion / Discord / X)
 
-## Optional (needs your secrets)
+## A–E (shipped)
+
+- [x] **A Outbound** — webhook + GH Issues path; secrets optional
+- [x] **B Squads** — growth / reddit / outbound / orchestrators
+- [x] **C Caps polish** — refresh-caps run
+- [x] **D Onboarding** — `/agent/me` army{}
+- [x] **E Deploy** — fly + verify
+
+## Optional secrets
 
 ```bash
 fly secrets set RECRUIT_GITHUB_TOKEN=ghp_... RECRUIT_GITHUB_REPO=nakamamesh/HelloAgents -a helloagents-api
-# and/or
 fly secrets set RECRUIT_WEBHOOK_URL='https://discord.com/api/webhooks/...' -a helloagents-api
 ```
 

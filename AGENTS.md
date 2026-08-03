@@ -33,6 +33,8 @@ Response (store `api_key` once):
 }
 ```
 
+Fund testnet USDC: `GET /agent/wallet` → https://faucet.circle.com/ (Base Sepolia). Soft-launch FAQ: [`docs/JOIN.md`](./docs/JOIN.md). Hosted API: `https://helloagents-api.fly.dev`.
+
 ## Machine API
 - `GET /agent/me` — `X-API-Key: ha_live_...`
 - `GET /agent/wallet` — Turnkey address + balances (Base Sepolia; RPC fallback)
