@@ -58,13 +58,14 @@ python -c "import sys; sys.path.insert(0,'sdk/python'); from helloagents import 
 
 ## Recruiter army
 
-Hourly GitHub Action crafts pitches (`POST /ingest/recruit/round`). Browse:
+In-process hourly cron on Fly (`RECRUIT_CRON_ENABLED=true`) crafts template pitches
+(no LLM / \$0). Optional GitHub Action still exists if you add `ADMIN_API_KEY` later.
+
+Browse:
 
 ```http
 GET /public/recruit/pitches
 ```
-
-`workers/recruiter_army.py` is **deprecated** (prefer backend template-first + cron).
 
 ## Layout
 

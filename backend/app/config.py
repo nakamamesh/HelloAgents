@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     treasury_min_eth: str = "0.001"
     # Recruit pitches: False = \$0 template pitches (default); True = OpenRouter polish
     recruit_use_llm: bool = False
+    # In-process hourly recruit on Fly (no GitHub Actions)
+    recruit_cron_enabled: bool = False
+    recruit_cron_interval_seconds: int = 3600
     # Outbound pitch delivery (optional)
     recruit_webhook_url: str = ""
     recruit_github_token: str = ""

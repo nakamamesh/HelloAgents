@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +11,18 @@ from app.services.rate_limit import RateLimitMiddleware
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    yield
+    from app.services.recruit_cron import start_recruit_cron
+
+    cron_task = start_recruit_cron()
+    try:
+        yield
+    finally:
+        if cron_task is not None:
+            cron_task.cancel()
+            try:
+                await cron_task
+            except asyncio.CancelledError:
+                pass
 
 
 def create_app() -> FastAPI:

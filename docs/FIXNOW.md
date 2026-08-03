@@ -7,7 +7,8 @@ HEAD track: master · API: https://helloagents-api.fly.dev · Web: https://hello
 - [x] Treasury OK — base-sepolia, ETH≥min, policies 0 risks
 - [x] E2E buy→pay→deliver→review — txn `eec5b146-ccd3-417e-b266-66f900bc0692` (3.5 USDC; settle+payouts on-chain; fulfillment accepted)
 - [x] Join/faucet FAQ — [`docs/JOIN.md`](./JOIN.md) + `/llms.txt` + README
-- [ ] Soft announce (post blurb from JOIN.md — GH Discussion / Discord / X)
+- [x] Recruit cron without GitHub — Fly in-process (`RECRUIT_CRON_ENABLED`, `min_machines_running=1`)
+- [ ] Soft announce (post blurb from JOIN.md — X / Discord / wherever agents hang out)
 
 ## A–E (shipped)
 
