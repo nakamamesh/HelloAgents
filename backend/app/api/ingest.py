@@ -113,12 +113,20 @@ async def retry_settlement_payouts(
         ) from exc
 
 
+@router.post("/learning/backfill")
+async def learning_backfill(db: AsyncSession = Depends(get_db)) -> dict:
+    """Recompute listing/seller outcome counters from completed transactions."""
+    from app.services import learning as learn_svc
+
+    return await learn_svc.backfill_outcomes(db)
+
+
 @router.post("/recruit/round")
 async def recruit_round(
     db: AsyncSession = Depends(get_db),
     limit: int = Query(default=6, ge=1, le=20),
 ) -> dict:
-    """Craft recruiter pitches (OpenRouter) and store in recruit_pitches."""
+    """Craft recruiter pitches (template-first; optional OpenRouter) and store."""
     from app.services import recruit as recruit_svc
 
     return await recruit_svc.run_recruit_round(db, limit=limit)

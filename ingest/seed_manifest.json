@@ -13,6 +13,69 @@
     {"path": "engineering/engineering-api-platform-engineer.md", "slug": "api-platform-engineer", "role": "seller", "price_usdc": "14.000000", "referral_budget": "15.000000"},
     {"path": "specialized/specialized-workflow-architect.md", "slug": "workflow-architect", "role": "seller", "price_usdc": "11.000000", "referral_budget": "10.000000"},
     {"path": "specialized/specialized-document-generator.md", "slug": "document-generator", "role": "publisher", "price_usdc": "3.500000", "referral_budget": "5.000000"},
-    {"path": "specialized/specialized-pricing-analyst.md", "slug": "pricing-analyst", "role": "buyer", "price_usdc": "6.500000", "referral_budget": "8.000000"}
+    {"path": "specialized/specialized-pricing-analyst.md", "slug": "pricing-analyst", "role": "buyer", "price_usdc": "6.500000", "referral_budget": "8.000000"},
+    {
+      "path": "specialized/recruitment-specialist.md",
+      "slug": "recruitment-specialist",
+      "role": "seller",
+      "price_usdc": "7.000000",
+      "referral_budget": "12.000000"
+    },
+    {
+      "path": "specialized/agents-orchestrator.md",
+      "slug": "agents-orchestrator",
+      "role": "seller",
+      "price_usdc": "12.000000",
+      "referral_budget": "12.000000"
+    },
+    {
+      "path": "engineering/engineering-multi-agent-systems-architect.md",
+      "slug": "multi-agent-architect",
+      "role": "seller",
+      "price_usdc": "16.000000",
+      "referral_budget": "15.000000"
+    },
+    {
+      "path": "engineering/engineering-autonomous-optimization-architect.md",
+      "slug": "autonomous-optimization-architect",
+      "role": "seller",
+      "price_usdc": "13.000000",
+      "referral_budget": "12.000000"
+    },
+    {
+      "path": "engineering/engineering-prompt-engineer.md",
+      "slug": "prompt-engineer",
+      "role": "seller",
+      "price_usdc": "8.000000",
+      "referral_budget": "10.000000"
+    },
+    {
+      "path": "engineering/engineering-codebase-onboarding-engineer.md",
+      "slug": "codebase-onboarding-engineer",
+      "role": "seller",
+      "price_usdc": "9.000000",
+      "referral_budget": "10.000000"
+    },
+    {
+      "path": "specialized/hr-onboarding.md",
+      "slug": "hr-onboarding",
+      "role": "seller",
+      "price_usdc": "6.000000",
+      "referral_budget": "8.000000"
+    },
+    {
+      "path": "specialized/agentic-identity-trust.md",
+      "slug": "agentic-identity-trust",
+      "role": "seller",
+      "price_usdc": "11.000000",
+      "referral_budget": "12.000000"
+    },
+    {
+      "path": "marketing/marketing-aeo-foundations.md",
+      "slug": "aeo-foundations",
+      "role": "publisher",
+      "price_usdc": "5.000000",
+      "referral_budget": "8.000000"
+    }
   ]
 }

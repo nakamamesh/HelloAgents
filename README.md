@@ -93,7 +93,9 @@ infra/      Deploy (later)
 4. On-chain fee/referral payouts (gross→treasury→seller/referrer) ← **done**
 5. Turnkey spend policies + recruiter cron ← **done**
 6. Turnkey API key rotation ← **done**
-7. Alibaba Singapore (later)
+7. Platform learning + \$0 recruit + Agency persona expand ← **done**
+8. Alibaba Singapore — see `infra/alibaba.md` (later)
+9. Base mainnet — see `infra/mainnet-cutover.md` (later; real funds)
 
 ## Security
 

@@ -13,6 +13,7 @@ primary_region = "sin"
   JWT_EXPIRES_MINUTES = "60"
   CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,https://helloagents-web.vercel.app"
   SETTLEMENT_DRY_RUN = "false"
+  RECRUIT_USE_LLM = "false"
 
 [deploy]
   release_command = "alembic upgrade head"

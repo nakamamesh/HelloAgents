@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -31,6 +32,8 @@ class PublicRegisterRequest(BaseModel):
     skills: list[str] = Field(default_factory=list)
     referral_code: str | None = Field(default=None, max_length=32)
     slug: str | None = Field(default=None, max_length=128)
+    # Agency persona path e.g. "specialized/recruitment-specialist.md"
+    persona_source: str | None = Field(default=None, max_length=512)
 
     @field_validator("slug")
     @classmethod
@@ -39,6 +42,16 @@ class PublicRegisterRequest(BaseModel):
             return v
         if not re.match(r"^[a-z0-9][a-z0-9\-]*$", v):
             raise ValueError("slug must be lowercase alphanumeric/hyphen")
+        return v
+
+    @field_validator("persona_source")
+    @classmethod
+    def persona_ok(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip().lstrip("/")
+        if ".." in v or not v.endswith(".md"):
+            raise ValueError("persona_source must be a .md path under snapshot/")
         return v
 
 
@@ -140,6 +153,26 @@ async def public_register(
         code = mint_referral_code()
 
     raw_key = mint_api_key()
+    persona_version_id = None
+    if body.persona_source:
+        from app.models.orm import PersonaVersion
+
+        res = await db.execute(
+            select(PersonaVersion)
+            .where(PersonaVersion.source_path == body.persona_source)
+            .order_by(PersonaVersion.created_at.desc())
+            .limit(1)
+        )
+        persona = res.scalar_one_or_none()
+        if persona is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="unknown persona_source — GET /public/personas",
+            )
+        persona_version_id = persona.id
+        if not body.description:
+            body.description = persona.description or persona.mission
+
     agent = Agent(
         slug=slug,
         name=body.name,
@@ -149,9 +182,14 @@ async def public_register(
         api_key_hash=hash_api_key(raw_key),
         referral_code=code,
         referred_by_agent_id=referrer.id if referrer else None,
+        persona_version_id=persona_version_id,
         reputation_score=Decimal("0"),
         referral_budget=Decimal("0"),
-        meta={"skills": body.skills, "public_join": True},
+        meta={
+            "skills": body.skills,
+            "public_join": True,
+            "persona_source": body.persona_source,
+        },
     )
     db.add(agent)
     await db.flush()
@@ -201,14 +239,23 @@ async def public_catalog(
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict]:
+    from app.services import learning as learn_svc
+
     result = await db.execute(
         select(Listing, Agent)
         .join(Agent, Listing.agent_id == Agent.id)
         .where(Listing.status == ListingStatus.ACTIVE, Agent.status == AgentStatus.ACTIVE)
-        .order_by(Listing.created_at.desc())
-        .limit(limit)
     )
-    rows = result.all()
+    rows = list(result.all())
+    scores = await learn_svc.catalog_rank_scores(db)
+    rows.sort(
+        key=lambda pair: (
+            scores.get(str(pair[0].id), 0.0),
+            pair[0].created_at.timestamp() if pair[0].created_at else 0,
+        ),
+        reverse=True,
+    )
+    rows = rows[:limit]
     return [
         {
             "listing_id": str(listing.id),
@@ -219,9 +266,53 @@ async def public_catalog(
             "agent_name": agent.name,
             "agent_role": agent.role.value,
             "referral_code": agent.referral_code,
+            "rank_score": scores.get(str(listing.id), 0.0),
+            "completed_sales": int((listing.meta or {}).get("completed_sales") or 0),
         }
         for listing, agent in rows
     ]
+
+
+@router.get("/insights")
+async def public_insights(db: AsyncSession = Depends(get_db)) -> dict:
+    """Platform learning snapshot — ranking/template hints (fees locked)."""
+    from app.services import learning as learn_svc
+
+    return await learn_svc.platform_insights(db)
+
+
+@router.get("/personas")
+async def public_personas(
+    limit: int = Query(default=100, ge=1, le=300),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Browse Agency persona templates available for join (persona_source on register)."""
+    from app.models.orm import PersonaVersion
+
+    result = await db.execute(
+        select(PersonaVersion).order_by(PersonaVersion.division.asc(), PersonaVersion.name.asc()).limit(limit)
+    )
+    # de-dupe by source_path keeping latest
+    latest: dict[str, Any] = {}
+    for p in result.scalars().all():
+        prev = latest.get(p.source_path)
+        if prev is None or (p.created_at and prev["created_at"] and p.created_at > prev["_dt"]):
+            latest[p.source_path] = {
+                "source_path": p.source_path,
+                "name": p.name,
+                "division": p.division,
+                "description": (p.description or "")[:240],
+                "sellable_capabilities": (p.sellable_capabilities or [])[:8],
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "_dt": p.created_at,
+            }
+    personas = [{k: v for k, v in row.items() if k != "_dt"} for row in latest.values()]
+    return {
+        "count": len(personas),
+        "personas": personas,
+        "join_hint": 'POST /public/register with {"name":"...","persona_source":"<source_path>","referral_code":"..."}',
+        "upstream": "msitarzewski/agency-agents (MIT)",
+    }
 
 
 @router.get("/recruit/pitches")

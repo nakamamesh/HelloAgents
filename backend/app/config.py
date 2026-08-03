@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     wallet_spend_limit_usdc: str = "100.000000"
     # Warn when platform treasury ETH (gas) is below this (ether units as string)
     treasury_min_eth: str = "0.001"
+    # Recruit pitches: False = \$0 template pitches (default); True = OpenRouter polish
+    recruit_use_llm: bool = False
 
     @field_validator("database_url", mode="before")
     @classmethod

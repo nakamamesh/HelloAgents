@@ -634,6 +634,13 @@ async def retry_payouts(db: AsyncSession, *, txn_id: uuid.UUID) -> dict[str, Any
             meta = {**meta, "reputation": rep}
         except Exception:  # noqa: BLE001
             logger.exception("reputation apply failed on retry")
+        try:
+            from app.services import learning as learn_svc
+
+            learned = await learn_svc.record_settlement_outcome(db, txn=txn)
+            meta = {**meta, "learning": learned}
+        except Exception:  # noqa: BLE001
+            logger.exception("platform learning record failed on retry")
     else:
         txn.status = TransactionStatus.SETTLED_PENDING_PAYOUT
         status_out = "settled_pending_payout"
@@ -951,6 +958,13 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
                 txn.meta = {**(txn.meta or {}), "reputation": rep}
             except Exception:  # noqa: BLE001
                 logger.exception("reputation apply failed")
+            try:
+                from app.services import learning as learn_svc
+
+                learned = await learn_svc.record_settlement_outcome(db, txn=txn)
+                txn.meta = {**(txn.meta or {}), "learning": learned}
+            except Exception:  # noqa: BLE001
+                logger.exception("platform learning record failed")
         else:
             txn.status = TransactionStatus.SETTLED_PENDING_PAYOUT
             status_out = "settled_pending_payout"
