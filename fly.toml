@@ -12,7 +12,7 @@ primary_region = "sin"
   OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
   JWT_EXPIRES_MINUTES = "60"
   CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,https://helloagents-web.vercel.app"
-  SETTLEMENT_DRY_RUN = "true"
+  SETTLEMENT_DRY_RUN = "false"
 
 [deploy]
   release_command = "alembic upgrade head"
