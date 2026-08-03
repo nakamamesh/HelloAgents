@@ -148,50 +148,114 @@ async def ensure_treasury_wallet() -> WalletProvision | None:
     return await provision_evm_account("platform-treasury")
 
 
+def _rpc_url(network: str) -> str:
+    if network in ("base", "base-mainnet"):
+        return "https://mainnet.base.org"
+    return "https://base-sepolia-rpc.publicnode.com"
+
+
+async def _rpc_balances(address: str, network: str) -> list[dict[str, str]]:
+    """ETH + USDC via public RPC (fallback when Turnkey balance API unavailable)."""
+    import httpx
+
+    usdc = USDC_BY_NETWORK.get(network, USDC_BY_NETWORK["base-sepolia"])
+    addr = address.lower()
+    if not addr.startswith("0x"):
+        addr = "0x" + addr
+    bal_data = "0x70a08231" + addr[2:].zfill(64)
+    rpc = _rpc_url(network)
+
+    async with httpx.AsyncClient(timeout=20.0, trust_env=False) as client:
+
+        async def eth(method: str, params: list[Any]) -> Any:
+            resp = await client.post(
+                rpc, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            if body.get("error"):
+                raise RuntimeError(f"rpc {method}: {body['error']}")
+            return body["result"]
+
+        eth_wei = int(await eth("eth_getBalance", [addr, "latest"]), 16)
+        usdc_raw = int(await eth("eth_call", [{"to": usdc, "data": bal_data}, "latest"]), 16)
+
+    eth_amt = (Decimal(eth_wei) / Decimal(10**18)).quantize(Decimal("0.000001"))
+    usdc_amt = (Decimal(usdc_raw) / Decimal(1_000_000)).quantize(Decimal("0.000001"))
+    return [
+        {"symbol": "ETH", "amount": str(eth_amt), "contract": ""},
+        {"symbol": "USDC", "amount": str(usdc_amt), "contract": usdc},
+    ]
+
+
 async def list_balances(address: str) -> dict[str, Any]:
-    """Read balances for an address via Turnkey (network from settings)."""
-    if not wallet_configured():
-        return {"configured": False, "balances": []}
-
+    """Read balances: Turnkey when billed; else public RPC for ETH/USDC."""
     settings = get_settings()
-    caip2 = _CAIP2.get(settings.wallet_network, settings.wallet_network)
-    from turnkey_sdk_types.generated.types import GetWalletAddressBalancesBody
+    network = settings.wallet_network
 
-    client = _client()
-    result = client.get_wallet_address_balances(
-        GetWalletAddressBalancesBody(
-            organizationId=settings.turnkey_organization_id,
-            address=address,
-            caip2=caip2,
-        )
-    )
+    if wallet_configured():
+        caip2 = _CAIP2.get(network, network)
+        from turnkey_sdk_types.generated.types import GetWalletAddressBalancesBody
 
-    balances: list[dict[str, str]] = []
-    for item in result.balances or []:
-        balances.append(
-            {
-                "symbol": str(
-                    getattr(item, "symbol", None) or getattr(item, "asset", None) or "?"
-                ),
-                "amount": str(
-                    getattr(item, "balance", None)
-                    or getattr(item, "amount", None)
-                    or "0"
-                ),
-                "contract": str(
-                    getattr(item, "address", None)
-                    or getattr(item, "contractAddress", None)
-                    or ""
-                ),
+        try:
+            client = _client()
+            result = client.get_wallet_address_balances(
+                GetWalletAddressBalancesBody(
+                    organizationId=settings.turnkey_organization_id,
+                    address=address,
+                    caip2=caip2,
+                )
+            )
+            balances: list[dict[str, str]] = []
+            for item in result.balances or []:
+                balances.append(
+                    {
+                        "symbol": str(
+                            getattr(item, "symbol", None)
+                            or getattr(item, "asset", None)
+                            or "?"
+                        ),
+                        "amount": str(
+                            getattr(item, "balance", None)
+                            or getattr(item, "amount", None)
+                            or "0"
+                        ),
+                        "contract": str(
+                            getattr(item, "address", None)
+                            or getattr(item, "contractAddress", None)
+                            or ""
+                        ),
+                    }
+                )
+            return {
+                "configured": True,
+                "network": network,
+                "address": address,
+                "source": "turnkey",
+                "balances": balances,
             }
-        )
+        except Exception as exc:
+            logger.warning("Turnkey balances unavailable, RPC fallback: %s", exc)
 
-    return {
-        "configured": True,
-        "network": settings.wallet_network,
-        "address": address,
-        "balances": balances,
-    }
+    try:
+        balances = await _rpc_balances(address, network)
+        return {
+            "configured": wallet_configured(),
+            "network": network,
+            "address": address,
+            "source": "rpc",
+            "balances": balances,
+        }
+    except Exception as exc:
+        logger.exception("RPC balance read failed for %s", address)
+        return {
+            "configured": wallet_configured(),
+            "network": network,
+            "address": address,
+            "source": "error",
+            "balances": [],
+            "error": str(exc),
+        }
 
 
 def _spend_limit_atomic() -> int:

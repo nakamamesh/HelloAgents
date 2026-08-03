@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Query
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,6 +79,22 @@ async def apply_wallet_policies() -> dict:
     from app.services import wallets as wallet_svc
 
     return await wallet_svc.ensure_spend_policies()
+
+
+@router.post("/settlements/{txn_id}/retry-payouts")
+async def retry_settlement_payouts(
+    txn_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Retry treasury→seller/referrer after settle OK but disperse failed."""
+    from app.services import settlement
+
+    try:
+        return await settlement.retry_payouts(db, txn_id=txn_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
 
 
 @router.post("/recruit/round")

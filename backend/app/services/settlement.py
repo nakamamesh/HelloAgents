@@ -401,6 +401,41 @@ async def _usdc_transfer_via_turnkey(
     return {**result, "value_atomic": str(value_atomic), "recipient": to_addr}
 
 
+async def _rpc_usdc_balance_atomic(address: str, network: str) -> int:
+    asset = USDC_BY_NETWORK[network]
+    addr = address.lower()
+    data = "0x70a08231" + addr[2:].zfill(64)
+    rpc = _rpc_url(network)
+    async with httpx.AsyncClient(timeout=20.0, trust_env=False) as client:
+        resp = await client.post(
+            rpc,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "eth_call",
+                "params": [{"to": asset, "data": data}, "latest"],
+            },
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        if body.get("error"):
+            raise RuntimeError(f"rpc balanceOf: {body['error']}")
+        return int(body["result"], 16)
+
+
+async def _wait_treasury_funded(
+    *, treasury: str, need_atomic: int, network: str, attempts: int = 12
+) -> int:
+    """XPay can return success before the Transfer is queryable — poll briefly."""
+    bal = 0
+    for i in range(attempts):
+        bal = await _rpc_usdc_balance_atomic(treasury, network)
+        if bal >= need_atomic:
+            return bal
+        await asyncio.sleep(1.0 + i * 0.25)
+    return bal
+
+
 async def _self_settle_via_turnkey(
     *,
     from_addr: str,
@@ -444,6 +479,7 @@ async def _disperse_splits(
     buyer: Agent,
     network: str,
     dry_run: bool = False,
+    prior_payouts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """After gross lands in treasury: pay seller_net + referral; platform_keep stays."""
     meta = txn.meta or {}
@@ -455,6 +491,7 @@ async def _disperse_splits(
     if not treasury or not seller_wallet:
         return {"success": False, "errorReason": "missing treasury/seller wallet"}
 
+    prior = prior_payouts or meta.get("payouts") or {}
     payouts: dict[str, Any] = {
         "treasury": treasury,
         "seller_wallet": seller_wallet,
@@ -469,51 +506,129 @@ async def _disperse_splits(
         return payouts
 
     seller_atomic = int(to_atomic_usdc(txn.seller_net_usdc))
-    seller_tx = await _usdc_transfer_via_turnkey(
-        from_addr=treasury,
-        to_addr=seller_wallet,
-        value_atomic=seller_atomic,
-        network=network,
+    ref_atomic = (
+        int(to_atomic_usdc(txn.referral_usdc))
+        if txn.referral_usdc > 0 and txn.referrer_agent_id is not None
+        else 0
     )
-    payouts["seller"] = seller_tx
-    if not seller_tx.get("success"):
-        payouts["success"] = False
-        payouts["errorReason"] = "seller_payout_failed"
-        return payouts
-
-    if txn.referral_usdc > 0 and txn.referrer_agent_id is not None:
-        referrer = await db.get(Agent, txn.referrer_agent_id)
-        ref_wallet = referrer.wallet_address if referrer else None
-        if not ref_wallet:
-            payouts["referral"] = {"success": False, "errorReason": "referrer_has_no_wallet"}
+    need = 0
+    prior_seller = prior.get("seller") or {}
+    if not prior_seller.get("success"):
+        need += seller_atomic
+    prior_ref = prior.get("referral") or {}
+    if ref_atomic and not prior_ref.get("success"):
+        need += ref_atomic
+    if need > 0:
+        bal = await _wait_treasury_funded(
+            treasury=treasury, need_atomic=need, network=network
+        )
+        payouts["treasury_balance_atomic"] = str(bal)
+        if bal < need:
             payouts["success"] = False
+            payouts["errorReason"] = (
+                f"treasury_underfunded need={need} have={bal}"
+            )
+            if prior_seller.get("success"):
+                payouts["seller"] = prior_seller
+            if prior_ref.get("success"):
+                payouts["referral"] = prior_ref
             return payouts
-        ref_atomic = int(to_atomic_usdc(txn.referral_usdc))
-        ref_tx = await _usdc_transfer_via_turnkey(
+
+    if prior_seller.get("success"):
+        payouts["seller"] = {**prior_seller, "reused": True}
+    else:
+        seller_tx = await _usdc_transfer_via_turnkey(
             from_addr=treasury,
-            to_addr=ref_wallet,
-            value_atomic=ref_atomic,
+            to_addr=seller_wallet,
+            value_atomic=seller_atomic,
             network=network,
         )
-        payouts["referral"] = {**ref_tx, "referrer_wallet": ref_wallet}
-        if ref_tx.get("success"):
-            # mark ledger paid if present
-            existing = await db.execute(
-                select(ReferralLedgerEntry).where(
-                    ReferralLedgerEntry.idempotency_key == f"ref:{txn.id}"
-                )
-            )
-            entry = existing.scalar_one_or_none()
-            if entry is not None:
-                entry.status = LedgerStatus.PAID.value
-                entry.meta = {**(entry.meta or {}), "payout_tx": ref_tx.get("transaction")}
-        else:
+        payouts["seller"] = seller_tx
+        if not seller_tx.get("success"):
             payouts["success"] = False
-            payouts["errorReason"] = "referral_payout_failed"
+            payouts["errorReason"] = "seller_payout_failed"
             return payouts
+
+    if txn.referral_usdc > 0 and txn.referrer_agent_id is not None:
+        if prior_ref.get("success"):
+            payouts["referral"] = {**prior_ref, "reused": True}
+        else:
+            referrer = await db.get(Agent, txn.referrer_agent_id)
+            ref_wallet = referrer.wallet_address if referrer else None
+            if not ref_wallet:
+                payouts["referral"] = {
+                    "success": False,
+                    "errorReason": "referrer_has_no_wallet",
+                }
+                payouts["success"] = False
+                return payouts
+            ref_tx = await _usdc_transfer_via_turnkey(
+                from_addr=treasury,
+                to_addr=ref_wallet,
+                value_atomic=ref_atomic,
+                network=network,
+            )
+            payouts["referral"] = {**ref_tx, "referrer_wallet": ref_wallet}
+            if ref_tx.get("success"):
+                existing = await db.execute(
+                    select(ReferralLedgerEntry).where(
+                        ReferralLedgerEntry.idempotency_key == f"ref:{txn.id}"
+                    )
+                )
+                entry = existing.scalar_one_or_none()
+                if entry is not None:
+                    entry.status = LedgerStatus.PAID.value
+                    entry.meta = {
+                        **(entry.meta or {}),
+                        "payout_tx": ref_tx.get("transaction"),
+                    }
+            else:
+                payouts["success"] = False
+                payouts["errorReason"] = "referral_payout_failed"
+                return payouts
 
     payouts["success"] = True
     return payouts
+
+
+async def retry_payouts(db: AsyncSession, *, txn_id: uuid.UUID) -> dict[str, Any]:
+    """Re-run treasury → seller/referrer after settle succeeded but disperse failed."""
+    txn = await db.get(Transaction, txn_id)
+    if txn is None:
+        raise ValueError("transaction not found")
+    if txn.status != TransactionStatus.COMPLETED:
+        raise ValueError(f"transaction status is {txn.status}, need completed settle")
+    meta = txn.meta or {}
+    settle = meta.get("settle") or {}
+    if not settle.get("success"):
+        raise ValueError("settle did not succeed; cannot retry payouts")
+    prior = meta.get("payouts") or {}
+    if prior.get("success"):
+        return {
+            "transaction_id": str(txn.id),
+            "status": "completed",
+            "reused": True,
+            "payouts": prior,
+        }
+    buyer = await db.get(Agent, txn.buyer_agent_id)
+    if buyer is None:
+        raise ValueError("buyer missing")
+    network = meta.get("network") or get_settings().wallet_network
+    payouts = await _disperse_splits(
+        db, txn=txn, buyer=buyer, network=network, prior_payouts=prior
+    )
+    txn.meta = {**meta, "payouts": payouts, "payouts_retried_at": datetime.now(timezone.utc).isoformat()}
+    await db.commit()
+    await db.refresh(txn)
+    return {
+        "transaction_id": str(txn.id),
+        "status": "completed",
+        "reused": False,
+        "payouts": payouts,
+        "gross_usdc": str(txn.gross_usdc),
+        "seller_net_usdc": str(txn.seller_net_usdc),
+        "referral_usdc": str(txn.referral_usdc),
+    }
 
 
 async def facilitator_verify_and_settle(payment_payload: dict[str, Any], requirements: dict[str, Any]) -> dict[str, Any]:
