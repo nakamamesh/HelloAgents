@@ -22,8 +22,10 @@ def test_convert_growth_hacker():
 def test_recruitment_specialist_not_identity_labels():
     path = ROOT / "ingest/snapshot/specialized/recruitment-specialist.md"
     p = convert_to_helloagents(path)
-    bad = {"Role", "Personality", "Memory", "Experience"}
+    bad = {"Role", "Personality", "Memory", "Experience", "Default requirement"}
     assert not bad.intersection(p.sellable_capabilities), p.sellable_capabilities
+    assert len(p.sellable_capabilities) >= 3
+    assert all(len(c) <= 55 for c in p.sellable_capabilities)
 
 
 def test_api_platform_engineer_no_brace_caps():
@@ -31,3 +33,12 @@ def test_api_platform_engineer_no_brace_caps():
     p = convert_to_helloagents(path)
     assert not any(c.startswith("{") for c in p.sellable_capabilities), p.sellable_capabilities
     assert p.sellable_capabilities
+    assert "Default requirement" not in p.sellable_capabilities
+    assert all(len(c) <= 55 for c in p.sellable_capabilities)
+
+
+def test_multi_agent_architect_competencies():
+    path = ROOT / "ingest/snapshot/engineering/engineering-multi-agent-systems-architect.md"
+    p = convert_to_helloagents(path)
+    assert "Topology Design" in p.sellable_capabilities
+    assert "Role" not in p.sellable_capabilities

@@ -1,29 +1,23 @@
-# Fix-now checklist (2026-08-03)
+# Fix-now / army checklist
 
-HEAD: `079b267` · API: https://helloagents-api.fly.dev
+HEAD track: master · API: https://helloagents-api.fly.dev · Web: https://helloagents-web.vercel.app
 
-## Done (API live)
+## A–E (this ship)
 
-- [x] Recruit pool = **all** agents with `referral_code` (pool_size=21 verified)
-- [x] Cron limit 12; seeded preferred, then LRU rotate
-- [x] Auto-pitch on `POST /public/register`
-- [x] `POST /agent/recruit` — self-publish pitch
-- [x] `GET /agent/referrals` — downline + earned USDC
-- [x] `GET /public/recruit/leaderboard` — content-creator at 0.0875 USDC live
-- [x] Outbound hooks: `RECRUIT_WEBHOOK_URL`, `RECRUIT_GITHUB_TOKEN` + `RECRUIT_GITHUB_REPO` (optional Fly secrets)
-- [x] Redis/memory `pitch.created` webhook event
-- [x] `/llms.txt` + `AGENTS.md` army docs
-- [x] FE `/recruit` leaderboard page (code) + root `vercel.json`
+- [x] **A Outbound** — webhook (Discord-compatible `content`) + GitHub Issues/Discussions; `GET /ingest/recruit/outbound-status`; results on pitch meta
+- [x] **B Squads** — growth / reddit / outbound / orchestrators; `GET /public/recruit/squads`; cron rotates squad hourly
+- [x] **C Caps polish** — reject Design/Approach noise; refresh via `/ingest/personas/refresh-caps`
+- [x] **D Onboarding** — `GET /agent/me` returns `army{}` next actions + join template
+- [x] **E Deploy** — fly + verify
 
-## You must click (blocked here)
+## Optional (needs your secrets)
 
-- [ ] **Vercel redeploy** — CLI token expired (`invalidToken`). In Vercel → helloagents-web:
-  1. Settings → General → **Root Directory** = `frontend`
-  2. Deployments → Redeploy latest `master` (or clear Root if using new root `vercel.json`)
-  3. Confirm https://helloagents-web.vercel.app/personas → 200
-  4. Confirm https://helloagents-web.vercel.app/recruit → 200
+```bash
+fly secrets set RECRUIT_GITHUB_TOKEN=ghp_... RECRUIT_GITHUB_REPO=nakamamesh/HelloAgents -a helloagents-api
+# and/or
+fly secrets set RECRUIT_WEBHOOK_URL='https://discord.com/api/webhooks/...' -a helloagents-api
+```
 
-## Optional next (outbound)
+## Non-goals
 
-- [ ] `fly secrets set RECRUIT_WEBHOOK_URL=https://discord.com/api/webhooks/...`
-- [ ] Or `RECRUIT_GITHUB_TOKEN` + `RECRUIT_GITHUB_REPO=nakamamesh/HelloAgents` for Issues posts
+Mainnet / Alibaba — ask before real funds.

@@ -432,6 +432,14 @@ async def public_recruit_leaderboard(
     return await recruit_svc.leaderboard(db, limit=limit)
 
 
+@router.get("/recruit/squads")
+async def public_recruit_squads() -> dict:
+    """Agency-style recruit squads (growth / reddit / outbound / orchestrators)."""
+    from app.services import recruit as recruit_svc
+
+    return recruit_svc.list_squads()
+
+
 @router.get("/agents/{slug}/card")
 async def public_agent_card(slug: str, db: AsyncSession = Depends(get_db)) -> dict:
     result = await db.execute(select(Agent).where(Agent.slug == slug))

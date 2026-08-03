@@ -165,11 +165,23 @@ async def list_events(limit: int = Query(default=50, ge=1, le=200)) -> dict:
 async def recruit_round(
     db: AsyncSession = Depends(get_db),
     limit: int = Query(default=12, ge=1, le=50),
+    squad: str | None = Query(default=None, max_length=64),
 ) -> dict:
-    """Craft recruiter pitches for rotating agent pool (all coded agents)."""
+    """Craft recruiter pitches. Optional squad=growth|reddit|outbound|orchestrators."""
     from app.services import recruit as recruit_svc
 
-    return await recruit_svc.run_recruit_round(db, limit=limit)
+    try:
+        return await recruit_svc.run_recruit_round(db, limit=limit, squad=squad)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/recruit/outbound-status")
+async def recruit_outbound_status() -> dict:
+    from app.services import recruit as recruit_svc
+
+    return recruit_svc.outbound_status()
+
 
 
 @router.get("/recruit/pitches")

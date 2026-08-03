@@ -39,8 +39,17 @@ HELLOAGENTS_TOOLS = [
 SECTION_ALIASES = {
     "identity": ("identity", "identity & role definition", "identity and role", "your identity"),
     "mission": ("core mission", "mission", "purpose"),
-    "workflow": ("workflow", "operating workflow", "process", "decision framework"),
-    "deliverables": ("core capabilities", "deliverables", "outputs", "what you deliver"),
+    # Avoid bare "process" — matches "Interview Process Design" etc.
+    "workflow": ("workflow process", "operating workflow", "your workflow", "workflow"),
+    "deliverables": (
+        "core capabilities",
+        "core competencies",
+        "advanced capabilities",
+        "technical deliverables",
+        "deliverables",
+        "outputs",
+        "what you deliver",
+    ),
     "success_metrics": ("success metrics", "success criteria", "metrics", "kpis"),
 }
 
@@ -64,9 +73,38 @@ _IDENTITY_LABELS = frozenset(
 # Noise from OpenAPI / JSON / code fences mistakenly treated as bullets
 _CAP_REJECT = re.compile(
     r"^(\{|\[|\}|\]|name|in|type|schema|required|properties|description|"
-    r"parameters|items|enum|default|example|format|\$ref)",
+    r"parameters|items|enum|default|example|format|\$ref|"
+    r"design|define|build|establish|generate|identify|determine|find|focus|"
+    r"use|screen|create|write|make|add|set|get|run|start|stop|open|close)$",
     re.I,
 )
+
+# Single-token imperatives / vague nouns that pollute match
+_NOISE_CAPS = frozenset(
+    {
+        "design",
+        "define",
+        "build",
+        "establish",
+        "generate",
+        "identify",
+        "determine",
+        "find",
+        "focus",
+        "approach",
+        "data",
+        "multi",
+        "tool access matrix (example)",
+        "scope tokens",
+        "sandboxing",
+        "audit log",
+        "job profiles",
+        "default requirement",
+        "mitigations",
+        "failure mode",
+    }
+)
+
 
 
 @dataclass
@@ -131,6 +169,11 @@ def _split_sections(body: str) -> dict[str, str]:
 
 
 def _pick_section(sections: dict[str, str], aliases: tuple[str, ...]) -> str | None:
+    # Exact / boundary match first, then substring
+    for alias in aliases:
+        for key, val in sections.items():
+            if key == alias or key.startswith(alias + " ") or key.endswith(" " + alias):
+                return val
     for alias in aliases:
         for key, val in sections.items():
             if alias in key:
@@ -145,7 +188,8 @@ def _slugify(name: str) -> str:
 
 
 def _clean_cap(raw: str) -> str | None:
-    label = raw.strip().strip("*").strip("`").strip()
+    label = raw.strip().strip("*").strip("`").strip().strip('"').strip("'")
+    label = re.sub(r"[\r\n]+", " ", label)
     label = re.sub(r"\s+", " ", label)
     if not label or len(label) < 2:
         return None
@@ -164,15 +208,41 @@ def _clean_cap(raw: str) -> str | None:
         else:
             label = head.strip()
     low = label.lower()
-    if low in _IDENTITY_LABELS:
+    if low in _IDENTITY_LABELS or low in _NOISE_CAPS:
         return None
     if _CAP_REJECT.match(label):
         return None
     if label.startswith("{") or label.startswith("["):
         return None
-    if len(label) > 80:
-        label = label[:80].rstrip()
+    # Reject truncated / broken fragments
+    if label.endswith(("(", "-", "—", ",")) or label.startswith(('"', "'")):
+        return None
+    if label.count("(") != label.count(")"):
+        return None
+    words = label.split()
+    # Prefer multi-word skills; allow known short brand/tools (2+ chars with capital / acronym)
+    if len(words) == 1 and (len(label) < 4 or (len(label) < 12 and not label.isupper() and label[0].islower())):
+        return None
+    if len(words) == 1 and label.lower() in {"spec", "api", "sdk", "data", "code", "docs"}:
+        return None
+    # Skill labels are short noun phrases — not prose sentences
+    if len(words) > 7 or len(label) > 55:
+        return None
     return label
+
+
+def _dedupe_caps(caps: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for c in caps:
+        key = c.lower()
+        if key in seen or key in _NOISE_CAPS:
+            continue
+        seen.add(key)
+        out.append(c)
+        if len(out) >= 8:
+            break
+    return out
 
 
 def _capabilities_from_text(text: str | None, *, allow_identity_fallback: bool = False) -> list[str]:
@@ -209,7 +279,7 @@ def _capabilities_from_text(text: str | None, *, allow_identity_fallback: bool =
         caps.append(cand[:80])
         if len(caps) >= 8:
             break
-    return caps
+    return _dedupe_caps(caps)
 
 
 def _bold_labels(text: str | None) -> list[str]:
@@ -223,7 +293,6 @@ def _bold_labels(text: str | None) -> list[str]:
         cand = _clean_cap(m.group(1))
         if not cand or cand.lower() in _IDENTITY_LABELS:
             continue
-        # Skip section headings that are verbs-only noise if too short alone
         key = cand.lower()
         if key in seen:
             continue
@@ -231,7 +300,7 @@ def _bold_labels(text: str | None) -> list[str]:
         caps.append(cand[:80])
         if len(caps) >= 8:
             break
-    return caps
+    return _dedupe_caps(caps)
 
 
 def _capabilities_from_mission(mission: str | None) -> list[str]:
@@ -274,15 +343,19 @@ def convert_to_helloagents(
     deliverables = _pick_section(sections, SECTION_ALIASES["deliverables"])
     success_metrics = _pick_section(sections, SECTION_ALIASES["success_metrics"])
 
-    caps = (
+    caps = _dedupe_caps(
         _capabilities_from_text(deliverables)
+        or _bold_labels(deliverables)
         or _bold_labels(mission)
+        or _capabilities_from_text(mission)
         or _bold_labels(workflow)
         or _capabilities_from_text(workflow)
         or _capabilities_from_mission(mission)
         or _capabilities_from_text(description)
         or ([div.replace("-", " ").title()] if div else [])
     )
+    if not caps:
+        caps = [div.replace("-", " ").title()] if div else ["Marketplace Service"]
 
     catalog = [
         {

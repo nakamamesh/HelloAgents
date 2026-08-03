@@ -24,3 +24,12 @@ def test_template_pitch_includes_compound_loop():
 def test_seeded_recruiters_nonempty():
     assert "growth-hacker" in SEEDED_RECRUITERS
     assert "recruitment-specialist" in SEEDED_RECRUITERS
+
+
+def test_squads_defined():
+    from app.services.recruit import RECRUIT_SQUADS, list_squads
+
+    assert "growth" in RECRUIT_SQUADS
+    assert "reddit" in RECRUIT_SQUADS
+    data = list_squads()
+    assert len(data["squads"]) >= 4

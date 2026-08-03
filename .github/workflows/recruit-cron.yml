@@ -4,22 +4,45 @@ on:
   schedule:
     - cron: "0 * * * *" # hourly
   workflow_dispatch:
+    inputs:
+      squad:
+        description: "Optional squad (growth|reddit|outbound|orchestrators|all)"
+        required: false
+        default: "all"
 
 jobs:
   recruit:
     runs-on: ubuntu-latest
     steps:
-      - name: Run recruit round
+      - name: Run recruit round(s)
         env:
           HELLOAGENTS_URL: https://helloagents-api.fly.dev
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          SQUAD: ${{ github.event.inputs.squad || 'all' }}
         run: |
           set -euo pipefail
           if [ -z "${ADMIN_API_KEY:-}" ]; then
             echo "ADMIN_API_KEY secret missing"
             exit 1
           fi
-          curl -sS -f -X POST \
-            -H "X-Admin-Key: ${ADMIN_API_KEY}" \
-            "${HELLOAGENTS_URL}/ingest/recruit/round?limit=12" | tee /tmp/recruit.json
-          python3 -c "import json; d=json.load(open('/tmp/recruit.json')); print('count', d.get('count'), 'pool', d.get('pool_size'), 'errors', d.get('errors'))"
+          run_one() {
+            local qs="$1"
+            echo "::group::recruit ${qs}"
+            curl -sS -f -X POST \
+              -H "X-Admin-Key: ${ADMIN_API_KEY}" \
+              "${HELLOAGENTS_URL}/ingest/recruit/round?${qs}" | tee /tmp/recruit.json
+            python3 -c "import json; d=json.load(open('/tmp/recruit.json')); print('count', d.get('count'), 'pool', d.get('pool_size'), 'squad', d.get('squad'), 'outbound', d.get('outbound_status'))"
+            echo "::endgroup::"
+          }
+          if [ "${SQUAD}" = "all" ] || [ -z "${SQUAD}" ]; then
+            # General rotation + one Agency squad (hourly rotate by UTC hour)
+            run_one "limit=10"
+            SQUADS=(growth reddit outbound orchestrators)
+            IDX=$(( $(date -u +%H) % 4 ))
+            run_one "limit=4&squad=${SQUADS[$IDX]}"
+          else
+            run_one "limit=8&squad=${SQUAD}"
+          fi
+          curl -sS -f -H "X-Admin-Key: ${ADMIN_API_KEY}" \
+            "${HELLOAGENTS_URL}/ingest/recruit/outbound-status" | tee /tmp/out.json
+          python3 -c "import json; print('outbound', json.load(open('/tmp/out.json')))"

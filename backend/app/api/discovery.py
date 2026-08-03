@@ -128,6 +128,7 @@ async def well_known_agent_card(request: Request) -> dict:
             "insights": f"{base}/public/insights",
             "recruitPitches": f"{base}/public/recruit/pitches",
             "recruitLeaderboard": f"{base}/public/recruit/leaderboard",
+            "recruitSquads": f"{base}/public/recruit/squads",
             "llmsTxt": f"{base}/llms.txt",
             "agentMe": f"{base}/agent/me",
             "agentTransactions": f"{base}/agent/transactions",

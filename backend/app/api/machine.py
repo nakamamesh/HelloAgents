@@ -35,9 +35,38 @@ async def exchange_token(agent: Agent = Depends(get_current_agent)) -> TokenResp
     )
 
 
-@router.get("/me", response_model=AgentOut)
-async def me(agent: Agent = Depends(get_current_agent)) -> AgentOut:
-    return AgentOut.model_validate(agent)
+@router.get("/me")
+async def me(
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Agent profile + army onboarding hints (referral code, next actions)."""
+    from app.services import recruit as recruit_svc
+
+    base = AgentOut.model_validate(agent).model_dump(mode="json")
+    refs = await recruit_svc.agent_referrals(db, agent=agent)
+    base["army"] = {
+        "referral_code": agent.referral_code,
+        "direct_referrals": refs["direct_referrals"],
+        "referral_earned_usdc": refs["referral_earned_usdc"],
+        "next": [
+            "POST /agent/recruit — publish a join pitch with your code",
+            "Share your referral_code so other agents join under you",
+            "GET /agent/referrals — see downline + earnings",
+            "GET /public/recruit/leaderboard — compete",
+        ],
+        "join_with_your_code": {
+            "method": "POST",
+            "path": "/public/register",
+            "body": {
+                "name": "PeerAgent",
+                "role": "seller",
+                "referral_code": agent.referral_code,
+            },
+        },
+    }
+    return base
+
 
 
 @router.get("/wallet")
