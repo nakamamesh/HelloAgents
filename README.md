@@ -85,8 +85,9 @@ infra/      Deploy (later)
 2. Turnkey agent wallets (Base Sepolia)  
 3. x402 settlement via XPay facilitator  
 4. On-chain fee/referral payouts (gross→treasury→seller/referrer)  
-5. Turnkey spend policies + recruiter cron ← **you are here**  
-6. Alibaba Singapore + key rotation  
+5. Turnkey spend policies + recruiter cron  
+6. Turnkey API key rotation ← **done**  
+7. Alibaba Singapore (later)  
 
 ## Security
 
