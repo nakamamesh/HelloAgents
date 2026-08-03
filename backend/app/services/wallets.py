@@ -202,6 +202,9 @@ def _spend_limit_atomic() -> int:
 
 def _policy_specs(*, treasury_address: str, usdc: str, limit_atomic: int) -> list[dict[str, str]]:
     """Org ALLOW policies: EIP-3009 to treasury under cap; SIGN_TX only to USDC contract."""
+    # Turnkey requires bracket access for message map fields; addresses lowercase.
+    treasury = treasury_address.lower()
+    usdc_l = usdc.lower()
     return [
         {
             "policyName": POLICY_EIP3009,
@@ -209,9 +212,9 @@ def _policy_specs(*, treasury_address: str, usdc: str, limit_atomic: int) -> lis
                 "activity.type == 'ACTIVITY_TYPE_SIGN_RAW_PAYLOAD_V2' && "
                 "eth.eip_712.primary_type == 'TransferWithAuthorization' && "
                 "eth.eip_712.domain.name == 'USDC' && "
-                f"eth.eip_712.domain.verifying_contract == '{usdc}' && "
-                f"eth.eip_712.message.to == '{treasury_address}' && "
-                f"eth.eip_712.message.value <= {limit_atomic}"
+                f"eth.eip_712.domain.verifying_contract == '{usdc_l}' && "
+                f"eth.eip_712.message['to'] == '{treasury}' && "
+                f"eth.eip_712.message['value'] <= {limit_atomic}"
             ),
             "notes": (
                 f"HelloAgents: EIP-3009 USDC only to treasury, max {limit_atomic} atomic"
@@ -222,11 +225,43 @@ def _policy_specs(*, treasury_address: str, usdc: str, limit_atomic: int) -> lis
             "condition": (
                 "(activity.type == 'ACTIVITY_TYPE_SIGN_TRANSACTION_V2' || "
                 "activity.type == 'ACTIVITY_TYPE_SIGN_TRANSACTION') && "
-                f"eth.tx.to == '{usdc}'"
+                f"eth.tx.to == '{usdc_l}'"
             ),
             "notes": "HelloAgents: EVM txs only to USDC contract (self-settle + ERC20 transfer)",
         },
     ]
+
+
+def _list_policies_via_http(client: Any, org: str) -> dict[str, Any]:
+    """Fetch policies avoiding brittle SDK response validation on consensus=null."""
+    import httpx
+    from turnkey_sdk_types.generated.types import GetPoliciesBody
+
+    stamped = client.stamp_get_policies(GetPoliciesBody(organizationId=org))
+    stamp = stamped.stamp
+    header_name = getattr(stamp, "stamp_header_name", None) or "X-Stamp"
+    header_value = getattr(stamp, "stamp_header_value", None) or str(stamp)
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        header_name: header_value,
+    }
+    try:
+        resp = httpx.post(stamped.url, content=stamped.body, headers=headers, timeout=30.0)
+        resp.raise_for_status()
+        data = resp.json()
+        by_name: dict[str, Any] = {}
+        for p in data.get("policies") or []:
+            name = p.get("policyName") or p.get("name")
+            if name:
+                by_name[str(name)] = {
+                    "policyId": p.get("policyId") or p.get("id"),
+                    "condition": p.get("condition") or "",
+                }
+        return by_name
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("list_policies via http failed: %s", exc)
+        return {}
 
 
 async def ensure_spend_policies(*, treasury_address: str | None = None) -> dict[str, Any]:
@@ -236,7 +271,6 @@ async def ensure_spend_policies(*, treasury_address: str | None = None) -> dict[
 
     from turnkey_sdk_types.generated.types import (
         CreatePolicyBody,
-        GetPoliciesBody,
         UpdatePolicyBody,
         v1Effect,
     )
@@ -257,50 +291,53 @@ async def ensure_spend_policies(*, treasury_address: str | None = None) -> dict[
 
     client = _client()
     org = settings.turnkey_organization_id
-    existing = client.get_policies(GetPoliciesBody(organizationId=org))
-    by_name: dict[str, Any] = {}
-    for p in existing.policies or []:
-        name = getattr(p, "policyName", None) or getattr(p, "name", None)
-        if name:
-            by_name[str(name)] = p
+    by_name = _list_policies_via_http(client, org)
 
     created: list[str] = []
     updated: list[str] = []
+    errors: list[str] = []
     for spec in specs:
         name = spec["policyName"]
         prior = by_name.get(name)
-        if prior is None:
-            client.create_policy(
-                CreatePolicyBody(
-                    organizationId=org,
-                    policyName=name,
-                    effect=v1Effect.EFFECT_ALLOW,
-                    condition=spec["condition"],
-                    notes=spec["notes"],
+        try:
+            if prior is None:
+                client.create_policy(
+                    CreatePolicyBody(
+                        organizationId=org,
+                        policyName=name,
+                        effect=v1Effect.EFFECT_ALLOW,
+                        condition=spec["condition"],
+                        notes=spec["notes"],
+                    )
                 )
-            )
-            created.append(name)
-            continue
-        policy_id = getattr(prior, "policyId", None) or getattr(prior, "id", None)
-        prior_cond = getattr(prior, "condition", None) or ""
-        if policy_id and prior_cond != spec["condition"]:
-            client.update_policy(
-                UpdatePolicyBody(
-                    organizationId=org,
-                    policyId=str(policy_id),
-                    policyName=name,
-                    policyEffect=v1Effect.EFFECT_ALLOW,
-                    policyCondition=spec["condition"],
-                    policyNotes=spec["notes"],
+                created.append(name)
+                continue
+            policy_id = prior.get("policyId")
+            prior_cond = prior.get("condition") or ""
+            if policy_id and prior_cond != spec["condition"]:
+                client.update_policy(
+                    UpdatePolicyBody(
+                        organizationId=org,
+                        policyId=str(policy_id),
+                        policyName=name,
+                        policyEffect=v1Effect.EFFECT_ALLOW,
+                        policyCondition=spec["condition"],
+                        policyNotes=spec["notes"],
+                    )
                 )
-            )
-            updated.append(name)
+                updated.append(name)
+        except Exception as exc:  # noqa: BLE001
+            err = str(exc)
+            if "already" in err.lower() or "duplicate" in err.lower():
+                errors.append(f"{name}: exists ({err[:120]})")
+            else:
+                errors.append(f"{name}: {err[:240]}")
 
     return {
-        "ok": True,
+        "ok": len(errors) == 0,
         "network": network,
-        "usdc": usdc,
-        "treasury": treasury_address,
+        "usdc": usdc.lower(),
+        "treasury": treasury_address.lower(),
         "spend_limit_usdc": str(settings.wallet_spend_limit_usdc),
         "spend_limit_atomic": limit_atomic,
         "created": created,
@@ -308,8 +345,11 @@ async def ensure_spend_policies(*, treasury_address: str | None = None) -> dict[
         "unchanged": [
             s["policyName"]
             for s in specs
-            if s["policyName"] not in created and s["policyName"] not in updated
+            if s["policyName"] not in created
+            and s["policyName"] not in updated
+            and not any(s["policyName"] in e for e in errors)
         ],
+        "errors": errors,
         "note": (
             "ALLOW policies only — confirm org has no unrestricted SIGN_* allows "
             "that bypass these guards"
