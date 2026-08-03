@@ -95,6 +95,10 @@ async def create_checkout(
     has_referrer = buyer.referred_by_agent_id is not None
     split = compute_split(listing.price_usdc, has_referrer=has_referrer, rates=rates)
 
+    treasury = await wallet_svc.ensure_treasury_wallet()
+    if treasury is None or not treasury.address:
+        raise ValueError("platform treasury wallet unavailable — configure Turnkey")
+
     settings = get_settings()
     txn = Transaction(
         idempotency_key=idempotency_key,
@@ -109,10 +113,12 @@ async def create_checkout(
         status=TransactionStatus.PENDING,
         meta={
             "network": settings.wallet_network,
-            "pay_to": seller.wallet_address,
+            "pay_to": treasury.address,
+            "treasury_wallet": treasury.address,
+            "seller_wallet": seller.wallet_address,
             "buyer_wallet": buyer.wallet_address,
             "platform_keep_usdc": str(split.platform_keep_usdc),
-            "fee_note": "v1 on-chain: gross→seller; fee/referral ledger off-chain",
+            "fee_note": "v2 on-chain: gross→treasury; treasury pays seller_net + referral",
         },
     )
     db.add(txn)
@@ -282,6 +288,119 @@ def _transfer_with_authorization_calldata(
     return "0x" + sel.hex() + args.hex()
 
 
+def _extract_signed_tx(signed: Any) -> str:
+    signed_hex = getattr(signed, "signedTransaction", None)
+    if not signed_hex and hasattr(signed, "model_dump"):
+        signed_hex = (signed.model_dump() or {}).get("signedTransaction")
+    if not signed_hex:
+        dump = signed.model_dump() if hasattr(signed, "model_dump") else {}
+        activity = dump.get("activity") or {}
+        result = activity.get("result") or {}
+        inner = result.get("signTransactionResult") or result
+        signed_hex = inner.get("signedTransaction")
+    if not signed_hex:
+        raise RuntimeError(f"Turnkey sign_transaction missing signed tx: {signed}")
+    if not str(signed_hex).startswith("0x"):
+        signed_hex = "0x" + str(signed_hex)
+    return str(signed_hex)
+
+
+async def _broadcast_turnkey_call(
+    *,
+    from_addr: str,
+    to_contract: str,
+    data: str,
+    network: str,
+) -> dict[str, Any]:
+    """Sign EIP-1559 contract call with Turnkey and broadcast via public RPC."""
+    import rlp
+    from turnkey_sdk_types.generated.types import SignTransactionBody, v1TransactionType
+
+    chain_id = CHAIN_ID_BY_NETWORK[network]
+    rpc = _rpc_url(network)
+
+    async with httpx.AsyncClient(timeout=45.0, trust_env=False) as client:
+
+        async def eth(method: str, params: list[Any]) -> Any:
+            resp = await client.post(
+                rpc, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            if body.get("error"):
+                raise RuntimeError(f"rpc {method}: {body['error']}")
+            return body["result"]
+
+        tx_nonce = int(await eth("eth_getTransactionCount", [from_addr, "pending"]), 16)
+        latest = await eth("eth_getBlockByNumber", ["latest", False])
+        base_fee = int(latest["baseFeePerGas"], 16)
+        max_priority = 1_000_000
+        max_fee = base_fee * 2 + max_priority
+        gas_est = int(
+            await eth("eth_estimateGas", [{"from": from_addr, "to": to_contract, "data": data}]), 16
+        )
+        gas_limit = int(gas_est * 12 // 10)
+        fields = [
+            chain_id,
+            tx_nonce,
+            max_priority,
+            max_fee,
+            gas_limit,
+            bytes.fromhex(to_contract[2:]),
+            0,
+            bytes.fromhex(data[2:]),
+            [],
+        ]
+        unsigned_hex = "02" + rlp.encode(fields).hex()
+        settings = get_settings()
+        signed = wallet_svc.turnkey_client().sign_transaction(
+            SignTransactionBody(
+                organizationId=settings.turnkey_organization_id,
+                signWith=from_addr,
+                unsignedTransaction=unsigned_hex,
+                type=v1TransactionType.TRANSACTION_TYPE_ETHEREUM,
+            )
+        )
+        signed_hex = _extract_signed_tx(signed)
+        tx_hash = await eth("eth_sendRawTransaction", [signed_hex])
+        receipt = None
+        for _ in range(20):
+            await asyncio.sleep(1.5)
+            receipt = await eth("eth_getTransactionReceipt", [tx_hash])
+            if receipt:
+                break
+        ok = bool(receipt and int(receipt.get("status", "0x0"), 16) == 1)
+        return {
+            "success": ok,
+            "transaction": tx_hash,
+            "network": network,
+            "from": from_addr,
+            "to": to_contract,
+            "receipt_status": (receipt or {}).get("status"),
+            "errorReason": None if ok else "tx_receipt_failed",
+        }
+
+
+def _usdc_transfer_calldata(*, to_addr: str, value_atomic: int) -> str:
+    from eth_abi import encode
+    from eth_hash.auto import keccak
+
+    sel = keccak(b"transfer(address,uint256)")[:4]
+    args = encode(["address", "uint256"], [to_addr, value_atomic])
+    return "0x" + sel.hex() + args.hex()
+
+
+async def _usdc_transfer_via_turnkey(
+    *, from_addr: str, to_addr: str, value_atomic: int, network: str
+) -> dict[str, Any]:
+    asset = USDC_BY_NETWORK[network]
+    data = _usdc_transfer_calldata(to_addr=to_addr, value_atomic=value_atomic)
+    result = await _broadcast_turnkey_call(
+        from_addr=from_addr, to_contract=asset, data=data, network=network
+    )
+    return {**result, "value_atomic": str(value_atomic), "recipient": to_addr}
+
+
 async def _self_settle_via_turnkey(
     *,
     from_addr: str,
@@ -294,11 +413,7 @@ async def _self_settle_via_turnkey(
     network: str,
 ) -> dict[str, Any]:
     """Submit EIP-3009 ourselves when XPay /settle fails (buyer pays gas via Turnkey)."""
-    import rlp
-    from turnkey_sdk_types.generated.types import SignTransactionBody, v1TransactionType
-
     asset = USDC_BY_NETWORK[network]
-    chain_id = CHAIN_ID_BY_NETWORK[network]
     data = _transfer_with_authorization_calldata(
         from_addr=from_addr,
         to_addr=to_addr,
@@ -308,83 +423,97 @@ async def _self_settle_via_turnkey(
         nonce=nonce,
         signature=signature,
     )
-    rpc = _rpc_url(network)
+    result = await _broadcast_turnkey_call(
+        from_addr=from_addr, to_contract=asset, data=data, network=network
+    )
+    return {
+        "success": result["success"],
+        "self_settle": True,
+        "transaction": result["transaction"],
+        "network": network,
+        "payer": from_addr,
+        "errorReason": result.get("errorReason"),
+        "receipt_status": result.get("receipt_status"),
+    }
 
-    async with httpx.AsyncClient(timeout=45.0, trust_env=False) as client:
 
-        async def eth(method: str, params: list[Any]) -> Any:
-            resp = await client.post(rpc, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
-            resp.raise_for_status()
-            body = resp.json()
-            if body.get("error"):
-                raise RuntimeError(f"rpc {method}: {body['error']}")
-            return body["result"]
+async def _disperse_splits(
+    db: AsyncSession,
+    *,
+    txn: Transaction,
+    buyer: Agent,
+    network: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """After gross lands in treasury: pay seller_net + referral; platform_keep stays."""
+    meta = txn.meta or {}
+    treasury = meta.get("treasury_wallet") or meta.get("pay_to")
+    seller_wallet = meta.get("seller_wallet")
+    if not treasury or not seller_wallet:
+        seller = await db.get(Agent, txn.seller_agent_id)
+        seller_wallet = seller_wallet or (seller.wallet_address if seller else None)
+    if not treasury or not seller_wallet:
+        return {"success": False, "errorReason": "missing treasury/seller wallet"}
 
-        tx_nonce = int(await eth("eth_getTransactionCount", [from_addr, "pending"]), 16)
-        latest = await eth("eth_getBlockByNumber", ["latest", False])
-        base_fee = int(latest["baseFeePerGas"], 16)
-        max_priority = 1_000_000  # 0.001 gwei
-        max_fee = base_fee * 2 + max_priority
-        gas_est = int(await eth("eth_estimateGas", [{"from": from_addr, "to": asset, "data": data}]), 16)
-        gas_limit = int(gas_est * 12 // 10)
+    payouts: dict[str, Any] = {
+        "treasury": treasury,
+        "seller_wallet": seller_wallet,
+        "seller_net_usdc": str(txn.seller_net_usdc),
+        "referral_usdc": str(txn.referral_usdc),
+        "platform_keep_usdc": meta.get("platform_keep_usdc"),
+    }
 
-        # EIP-1559 unsigned: 0x02 || rlp([chainId, nonce, priority, maxFee, gas, to, value, data, accessList])
-        fields = [
-            chain_id,
-            tx_nonce,
-            max_priority,
-            max_fee,
-            gas_limit,
-            bytes.fromhex(asset[2:]),
-            0,
-            bytes.fromhex(data[2:]),
-            [],
-        ]
-        unsigned_hex = "02" + rlp.encode(fields).hex()
+    if dry_run:
+        payouts["dry_run"] = True
+        payouts["success"] = True
+        return payouts
 
-        settings = get_settings()
-        tk = wallet_svc.turnkey_client()
-        signed = tk.sign_transaction(
-            SignTransactionBody(
-                organizationId=settings.turnkey_organization_id,
-                signWith=from_addr,
-                unsignedTransaction=unsigned_hex,
-                type=v1TransactionType.TRANSACTION_TYPE_ETHEREUM,
-            )
+    seller_atomic = int(to_atomic_usdc(txn.seller_net_usdc))
+    seller_tx = await _usdc_transfer_via_turnkey(
+        from_addr=treasury,
+        to_addr=seller_wallet,
+        value_atomic=seller_atomic,
+        network=network,
+    )
+    payouts["seller"] = seller_tx
+    if not seller_tx.get("success"):
+        payouts["success"] = False
+        payouts["errorReason"] = "seller_payout_failed"
+        return payouts
+
+    if txn.referral_usdc > 0 and txn.referrer_agent_id is not None:
+        referrer = await db.get(Agent, txn.referrer_agent_id)
+        ref_wallet = referrer.wallet_address if referrer else None
+        if not ref_wallet:
+            payouts["referral"] = {"success": False, "errorReason": "referrer_has_no_wallet"}
+            payouts["success"] = False
+            return payouts
+        ref_atomic = int(to_atomic_usdc(txn.referral_usdc))
+        ref_tx = await _usdc_transfer_via_turnkey(
+            from_addr=treasury,
+            to_addr=ref_wallet,
+            value_atomic=ref_atomic,
+            network=network,
         )
-        signed_hex = getattr(signed, "signedTransaction", None)
-        if not signed_hex and hasattr(signed, "model_dump"):
-            signed_hex = (signed.model_dump() or {}).get("signedTransaction")
-        if not signed_hex:
-            # activity result nesting
-            dump = signed.model_dump() if hasattr(signed, "model_dump") else {}
-            activity = dump.get("activity") or {}
-            result = activity.get("result") or {}
-            inner = result.get("signTransactionResult") or result
-            signed_hex = inner.get("signedTransaction")
-        if not signed_hex:
-            raise RuntimeError(f"Turnkey sign_transaction missing signed tx: {signed}")
-        if not str(signed_hex).startswith("0x"):
-            signed_hex = "0x" + str(signed_hex)
+        payouts["referral"] = {**ref_tx, "referrer_wallet": ref_wallet}
+        if ref_tx.get("success"):
+            # mark ledger paid if present
+            existing = await db.execute(
+                select(ReferralLedgerEntry).where(
+                    ReferralLedgerEntry.idempotency_key == f"ref:{txn.id}"
+                )
+            )
+            entry = existing.scalar_one_or_none()
+            if entry is not None:
+                entry.status = LedgerStatus.PAID.value
+                entry.meta = {**(entry.meta or {}), "payout_tx": ref_tx.get("transaction")}
+        else:
+            payouts["success"] = False
+            payouts["errorReason"] = "referral_payout_failed"
+            return payouts
 
-        tx_hash = await eth("eth_sendRawTransaction", [signed_hex])
-        # wait briefly for receipt
-        receipt = None
-        for _ in range(20):
-            await asyncio.sleep(1.5)
-            receipt = await eth("eth_getTransactionReceipt", [tx_hash])
-            if receipt:
-                break
-        ok = bool(receipt and int(receipt.get("status", "0x0"), 16) == 1)
-        return {
-            "success": ok,
-            "self_settle": True,
-            "transaction": tx_hash,
-            "network": network,
-            "payer": from_addr,
-            "errorReason": None if ok else "self_settle_receipt_failed",
-            "receipt_status": (receipt or {}).get("status"),
-        }
+    payouts["success"] = True
+    return payouts
 
 
 async def facilitator_verify_and_settle(payment_payload: dict[str, Any], requirements: dict[str, Any]) -> dict[str, Any]:
@@ -405,7 +534,7 @@ async def facilitator_verify_and_settle(payment_payload: dict[str, Any], require
 
 
 async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -> dict[str, Any]:
-    """Sign EIP-3009 via Turnkey, settle via XPay facilitator, finalize txn + referral ledger."""
+    """Sign EIP-3009 via Turnkey, settle via XPay (or self-settle), then disperse fee splits."""
     txn = await db.get(Transaction, txn_id)
     if txn is None:
         raise ValueError("transaction not found")
@@ -421,7 +550,7 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
     pay_to = (txn.meta or {}).get("pay_to")
     from_addr = buyer.wallet_address
     if not from_addr or not pay_to:
-        raise ValueError("missing buyer/seller wallet")
+        raise ValueError("missing buyer/pay_to wallet")
 
     if settings.settlement_dry_run:
         settle_result = {
@@ -433,10 +562,6 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
             "value_atomic": to_atomic_usdc(txn.gross_usdc),
             "note": "SETTLEMENT_DRY_RUN=true — no on-chain transfer",
         }
-        txn.status = TransactionStatus.COMPLETED
-        txn.completed_at = datetime.now(timezone.utc)
-        txn.checkout_id = f"dry-run-{txn.id}"
-        txn.meta = {**(txn.meta or {}), "settle": settle_result, "dry_run": True}
         if txn.referral_usdc > 0 and txn.referrer_agent_id is not None:
             db.add(
                 ReferralLedgerEntry(
@@ -449,6 +574,18 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
                     meta={"network": network, "dry_run": True},
                 )
             )
+        payouts = await _disperse_splits(
+            db, txn=txn, buyer=buyer, network=network, dry_run=True
+        )
+        txn.status = TransactionStatus.COMPLETED
+        txn.completed_at = datetime.now(timezone.utc)
+        txn.checkout_id = f"dry-run-{txn.id}"
+        txn.meta = {
+            **(txn.meta or {}),
+            "settle": settle_result,
+            "payouts": payouts,
+            "dry_run": True,
+        }
         await db.commit()
         await db.refresh(txn)
         return {
@@ -461,6 +598,7 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
             "platform_fee_usdc": str(txn.platform_fee_usdc),
             "referral_usdc": str(txn.referral_usdc),
             "settle": settle_result,
+            "payouts": payouts,
         }
 
     value_atomic = int(to_atomic_usdc(txn.gross_usdc))
@@ -522,6 +660,7 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
                 "payer": from_addr,
             }
 
+    payouts: dict[str, Any] | None = None
     txn.meta = {
         **(txn.meta or {}),
         "settle": settle_result,
@@ -544,6 +683,12 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
                     meta={"network": network},
                 )
             )
+        try:
+            payouts = await _disperse_splits(db, txn=txn, buyer=buyer, network=network)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("payout disperse failed")
+            payouts = {"success": False, "errorReason": str(exc)}
+        txn.meta = {**(txn.meta or {}), "payouts": payouts}
         status_out = "completed"
     else:
         txn.status = TransactionStatus.FAILED
@@ -560,4 +705,5 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
         "platform_fee_usdc": str(txn.platform_fee_usdc),
         "referral_usdc": str(txn.referral_usdc),
         "settle": settle_result,
+        "payouts": payouts,
     }

@@ -83,8 +83,9 @@ infra/      Deploy (later)
 
 1. Public join + catalog  
 2. Turnkey agent wallets (Base Sepolia)  
-3. x402 settlement via XPay facilitator ← **you are here**  
-4. On-chain fee/referral payouts + Alibaba Singapore
+3. x402 settlement via XPay facilitator  
+4. On-chain fee/referral payouts (gross→treasury→seller/referrer) ← **you are here**  
+5. Alibaba Singapore + Turnkey spend policies + recruiter cron  
 
 ## Security
 
