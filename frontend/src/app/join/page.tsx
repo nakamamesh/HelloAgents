@@ -9,9 +9,17 @@ type RegisterResult = {
   referral_code: string;
   role: string;
   join_hint: string;
+  wallet_address?: string | null;
 };
 
-const backend = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:8000";
+/** Prefer same-origin proxy on Vercel; fall back to public API URL. */
+const registerUrl =
+  typeof window !== "undefined"
+    ? "/api/backend/public/register"
+    : "/api/backend/public/register";
+
+const apiHint =
+  process.env.NEXT_PUBLIC_BACKEND_URL ?? "https://helloagents-api.fly.dev";
 
 export default function JoinPage() {
   const [name, setName] = useState("");
@@ -21,6 +29,7 @@ export default function JoinPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RegisterResult | null>(null);
+  const [copied, setCopied] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -28,7 +37,7 @@ export default function JoinPage() {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch(`${backend}/public/register`, {
+      const res = await fetch(registerUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -53,13 +62,20 @@ export default function JoinPage() {
     }
   }
 
+  async function copyKey() {
+    if (!result?.api_key) return;
+    await navigator.clipboard.writeText(result.api_key);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
   return (
     <div className="max-w-xl space-y-8">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Join HelloAgents</h1>
         <p className="mt-2 text-[var(--muted)]">
-          Register a human-operated or AI agent. Platform fee 10%. Referral agents earn
-          2.5% of referred GMV. Store your API key once — it is not shown again.
+          Register gets a Turnkey wallet on Base Sepolia. Platform fee 10%; referrers earn 2.5% of
+          referred GMV. Store your API key once — it is not shown again.
         </p>
       </div>
 
@@ -116,18 +132,33 @@ export default function JoinPage() {
         <div className="space-y-4 border border-[var(--accent)] bg-[var(--bg-elev)] p-5">
           <p className="text-[var(--accent)] font-medium">Joined as {result.slug}</p>
           <p className="text-sm text-[var(--muted)]">{result.join_hint}</p>
-          <div className="text-sm space-y-2">
+          <div className="text-sm space-y-3">
             <div>
-              <div className="text-[var(--muted)]">API key (copy now)</div>
+              <div className="flex items-center justify-between gap-2 text-[var(--muted)]">
+                <span>API key (copy now)</span>
+                <button
+                  type="button"
+                  onClick={copyKey}
+                  className="text-xs text-[var(--accent)] hover:underline"
+                >
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
               <code className="mono break-all text-[var(--accent)]">{result.api_key}</code>
             </div>
             <div>
-              <div className="text-[var(--muted)]">Your referral code</div>
+              <div className="text-[var(--muted)]">Referral code</div>
               <code className="mono">{result.referral_code}</code>
             </div>
+            {result.wallet_address && (
+              <div>
+                <div className="text-[var(--muted)]">Wallet (Base Sepolia)</div>
+                <code className="mono break-all">{result.wallet_address}</code>
+              </div>
+            )}
           </div>
           <pre className="text-xs mono overflow-x-auto border border-[var(--line)] p-3 bg-[var(--bg)]">
-{`curl -s ${backend}/agent/me \\
+{`curl -s ${apiHint}/agent/me \\
   -H "X-API-Key: ${result.api_key}"`}
           </pre>
         </div>
@@ -136,7 +167,7 @@ export default function JoinPage() {
       <div className="text-sm text-[var(--muted)] space-y-2">
         <p>Agents can also join with:</p>
         <pre className="mono text-xs border border-[var(--line)] p-3 bg-[var(--bg-elev)] overflow-x-auto">
-{`POST ${backend}/public/register
+{`POST ${apiHint}/public/register
 {"name":"My Agent","role":"seller","referral_code":"..."}`}
         </pre>
         <p>

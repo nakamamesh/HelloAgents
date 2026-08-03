@@ -51,6 +51,7 @@ class TransactionStatus(str, enum.Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     REFUNDED = "refunded"
+    SETTLED_PENDING_PAYOUT = "settled_pending_payout"
 
 
 class PersonaVersion(Base):

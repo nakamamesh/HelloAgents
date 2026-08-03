@@ -311,7 +311,13 @@ def _list_policies_via_http(client: Any, org: str) -> dict[str, Any]:
         header_name: header_value,
     }
     try:
-        resp = httpx.post(stamped.url, content=stamped.body, headers=headers, timeout=30.0)
+        resp = httpx.post(
+            stamped.url,
+            content=stamped.body,
+            headers=headers,
+            timeout=30.0,
+            trust_env=False,
+        )
         resp.raise_for_status()
         data = resp.json()
         by_name: dict[str, Any] = {}
@@ -321,11 +327,128 @@ def _list_policies_via_http(client: Any, org: str) -> dict[str, Any]:
                 by_name[str(name)] = {
                     "policyId": p.get("policyId") or p.get("id"),
                     "condition": p.get("condition") or "",
+                    "effect": str(p.get("effect") or p.get("policyEffect") or ""),
+                    "notes": p.get("notes") or "",
                 }
         return by_name
     except Exception as exc:  # noqa: BLE001
         logger.warning("list_policies via http failed: %s", exc)
         return {}
+
+
+def _policy_is_unrestricted_sign(condition: str) -> bool:
+    """True when an ALLOW condition grants SIGN_* without HelloAgents-style guards."""
+    c = (condition or "").strip().lower()
+    if not c or c in ("true", "1"):
+        return True
+    is_sign = (
+        "sign_transaction" in c
+        or "sign_raw_payload" in c
+        or "activity_type_sign_" in c
+    )
+    if not is_sign:
+        return False
+    has_tx_to = "eth.tx.to" in c
+    has_eip712 = "eth.eip_712" in c or "eip712" in c
+    return not (has_tx_to or has_eip712)
+
+
+async def audit_spend_policies() -> dict[str, Any]:
+    """List org policies and flag unrestricted SIGN_* ALLOW that can bypass guards."""
+    if not wallet_configured():
+        return {"ok": False, "error": "Turnkey not configured"}
+
+    settings = get_settings()
+    client = _client()
+    by_name = _list_policies_via_http(client, settings.turnkey_organization_id)
+    known = {POLICY_EIP3009, POLICY_SIGN_TX_USDC}
+    risks: list[dict[str, str]] = []
+    ok_policies: list[str] = []
+    for name, meta in sorted(by_name.items()):
+        effect = (meta.get("effect") or "").upper()
+        cond = meta.get("condition") or ""
+        if "DENY" in effect:
+            ok_policies.append(name)
+            continue
+        if _policy_is_unrestricted_sign(cond):
+            risks.append(
+                {
+                    "policyName": name,
+                    "policyId": str(meta.get("policyId") or ""),
+                    "reason": "unrestricted_sign_allow",
+                    "condition": cond[:300],
+                }
+            )
+        elif name in known:
+            ok_policies.append(name)
+        else:
+            # Non-HA policy that still has guards — note for human review
+            if "sign_" in cond.lower() or "sign_transaction" in cond.lower():
+                risks.append(
+                    {
+                        "policyName": name,
+                        "policyId": str(meta.get("policyId") or ""),
+                        "reason": "non_helloagents_sign_policy_review",
+                        "condition": cond[:300],
+                    }
+                )
+            else:
+                ok_policies.append(name)
+
+    missing = [n for n in known if n not in by_name]
+    return {
+        "ok": len(risks) == 0 and len(missing) == 0,
+        "policy_count": len(by_name),
+        "known_present": [n for n in known if n in by_name],
+        "missing_helloagents": missing,
+        "risks": risks,
+        "ok_policies": ok_policies,
+        "note": (
+            "Delete or tighten risks in Turnkey dashboard. "
+            "ALLOW-only HelloAgents policies: "
+            f"{POLICY_EIP3009}, {POLICY_SIGN_TX_USDC}"
+        ),
+    }
+
+
+async def treasury_status() -> dict[str, Any]:
+    """Treasury address + ETH/USDC for gas monitoring."""
+    settings = get_settings()
+    network = settings.wallet_network
+    treasury = await ensure_treasury_wallet()
+    if treasury is None:
+        return {"ok": False, "error": "treasury unavailable"}
+    balances = await list_balances(treasury.address)
+    eth_amt = Decimal("0")
+    usdc_amt = Decimal("0")
+    for b in balances.get("balances") or []:
+        sym = str(b.get("symbol") or "").upper()
+        try:
+            amt = Decimal(str(b.get("amount") or "0"))
+        except Exception:  # noqa: BLE001
+            amt = Decimal("0")
+        if sym == "ETH":
+            eth_amt = amt
+        elif sym == "USDC":
+            usdc_amt = amt
+    min_eth = Decimal(str(settings.treasury_min_eth))
+    low_gas = eth_amt < min_eth
+    return {
+        "ok": not low_gas,
+        "network": network,
+        "address": treasury.address,
+        "wallet_id": treasury.wallet_id,
+        "eth": str(eth_amt),
+        "usdc": str(usdc_amt),
+        "min_eth": str(min_eth),
+        "low_gas": low_gas,
+        "source": balances.get("source"),
+        "hint": (
+            "Fund treasury with Base Sepolia ETH for disperse gas"
+            if low_gas
+            else None
+        ),
+    }
 
 
 async def ensure_spend_policies(*, treasury_address: str | None = None) -> dict[str, Any]:
@@ -415,7 +538,7 @@ async def ensure_spend_policies(*, treasury_address: str | None = None) -> dict[
         ],
         "errors": errors,
         "note": (
-            "ALLOW policies only — confirm org has no unrestricted SIGN_* allows "
-            "that bypass these guards"
+            "ALLOW policies only — GET /ingest/wallets/policies/audit "
+            "flags unrestricted SIGN_* that can bypass these guards"
         ),
     }

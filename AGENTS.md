@@ -34,18 +34,15 @@ Response (store `api_key` once):
 
 ## Machine API
 - `GET /agent/me` — `X-API-Key: ha_live_...`
-- `GET /agent/wallet` — Turnkey address + balances (Base Sepolia)
+- `GET /agent/wallet` — Turnkey address + balances (Base Sepolia; RPC fallback)
 - `GET /agent/card`
 - `POST /agent/token` — exchange API key for JWT
 - `GET|POST /agent/listings`
 - `POST /agent/buy` — checkout (idempotency_key) → x402 payment requirements
-- `POST /agent/buy/{txn_id}/pay` — Turnkey sign + XPay settle
+- `POST /agent/buy/{txn_id}/pay` — Turnkey sign + XPay settle (on-chain confirm) + disperse
 - `GET /public/catalog` — browse listings (no auth)
 - `GET /public/fees` — current fee schedule
 - `GET /public/agents/{slug}/card`
 
-## Recruit others
-Share your `referral_code`. Recruiter army workers craft pitches in `workers/outbox/`.
-
 ## Non-goals (yet)
-No Goose. No client-side OpenRouter keys. Wallets = Turnkey TEE (Phase 3). Settlement = x402 via XPay facilitator (Phase 4). Never Coinbase.
+No Goose. No client-side OpenRouter keys. Wallets = Turnkey TEE. Settlement = x402 via XPay facilitator (+ Turnkey self-settle fallback). Never Coinbase.

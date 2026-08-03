@@ -596,14 +596,20 @@ async def retry_payouts(db: AsyncSession, *, txn_id: uuid.UUID) -> dict[str, Any
     txn = await db.get(Transaction, txn_id)
     if txn is None:
         raise ValueError("transaction not found")
-    if txn.status != TransactionStatus.COMPLETED:
-        raise ValueError(f"transaction status is {txn.status}, need completed settle")
+    allowed = {
+        TransactionStatus.COMPLETED,
+        TransactionStatus.SETTLED_PENDING_PAYOUT,
+    }
+    if txn.status not in allowed:
+        raise ValueError(
+            f"transaction status is {txn.status}, need completed or settled_pending_payout"
+        )
     meta = txn.meta or {}
     settle = meta.get("settle") or {}
     if not settle.get("success"):
         raise ValueError("settle did not succeed; cannot retry payouts")
     prior = meta.get("payouts") or {}
-    if prior.get("success"):
+    if prior.get("success") and txn.status == TransactionStatus.COMPLETED:
         return {
             "transaction_id": str(txn.id),
             "status": "completed",
@@ -617,12 +623,23 @@ async def retry_payouts(db: AsyncSession, *, txn_id: uuid.UUID) -> dict[str, Any
     payouts = await _disperse_splits(
         db, txn=txn, buyer=buyer, network=network, prior_payouts=prior
     )
-    txn.meta = {**meta, "payouts": payouts, "payouts_retried_at": datetime.now(timezone.utc).isoformat()}
+    if payouts.get("success"):
+        txn.status = TransactionStatus.COMPLETED
+        txn.completed_at = txn.completed_at or datetime.now(timezone.utc)
+        status_out = "completed"
+    else:
+        txn.status = TransactionStatus.SETTLED_PENDING_PAYOUT
+        status_out = "settled_pending_payout"
+    txn.meta = {
+        **meta,
+        "payouts": payouts,
+        "payouts_retried_at": datetime.now(timezone.utc).isoformat(),
+    }
     await db.commit()
     await db.refresh(txn)
     return {
         "transaction_id": str(txn.id),
-        "status": "completed",
+        "status": status_out,
         "reused": False,
         "payouts": payouts,
         "gross_usdc": str(txn.gross_usdc),
@@ -648,6 +665,110 @@ async def facilitator_verify_and_settle(payment_payload: dict[str, Any], require
         return settle.json()
 
 
+async def _confirm_settle_on_chain(
+    settle_result: dict[str, Any],
+    *,
+    from_addr: str,
+    to_addr: str,
+    value_atomic: int,
+    network: str,
+) -> dict[str, Any]:
+    """Require mined receipt + USDC Transfer buyer→treasury before trusting XPay success."""
+    if not settle_result.get("success"):
+        return settle_result
+    tx_hash = settle_result.get("transaction") or settle_result.get("txHash")
+    if not tx_hash:
+        return {
+            **settle_result,
+            "success": False,
+            "errorReason": "facilitator_success_missing_tx",
+            "confirmed": False,
+        }
+
+    rpc = _rpc_url(network)
+    usdc = USDC_BY_NETWORK[network].lower()
+    fr = from_addr.lower()
+    to = to_addr.lower()
+    transfer_topic = (
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    )
+
+    async with httpx.AsyncClient(timeout=45.0, trust_env=False) as client:
+        receipt = None
+        for i in range(18):
+            resp = await client.post(
+                rpc,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "eth_getTransactionReceipt",
+                    "params": [tx_hash],
+                },
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            if body.get("error"):
+                return {
+                    **settle_result,
+                    "success": False,
+                    "errorReason": f"rpc receipt: {body['error']}",
+                    "confirmed": False,
+                }
+            receipt = body.get("result")
+            if receipt:
+                break
+            await asyncio.sleep(1.0 + i * 0.15)
+
+    if not receipt:
+        return {
+            **settle_result,
+            "success": False,
+            "errorReason": "settle_tx_not_found",
+            "transaction": tx_hash,
+            "confirmed": False,
+        }
+    if int(receipt.get("status") or "0x0", 16) != 1:
+        return {
+            **settle_result,
+            "success": False,
+            "errorReason": "settle_tx_reverted",
+            "transaction": tx_hash,
+            "confirmed": False,
+        }
+
+    found = False
+    for log in receipt.get("logs") or []:
+        if (log.get("address") or "").lower() != usdc:
+            continue
+        topics = log.get("topics") or []
+        if len(topics) < 3 or (topics[0] or "").lower() != transfer_topic:
+            continue
+        log_from = "0x" + topics[1][-40:].lower()
+        log_to = "0x" + topics[2][-40:].lower()
+        amount = int(log.get("data") or "0x0", 16)
+        if log_from == fr and log_to == to and amount == value_atomic:
+            found = True
+            break
+
+    if not found:
+        return {
+            **settle_result,
+            "success": False,
+            "errorReason": "settle_missing_usdc_transfer",
+            "transaction": tx_hash,
+            "confirmed": False,
+        }
+
+    return {
+        **settle_result,
+        "success": True,
+        "transaction": tx_hash,
+        "confirmed": True,
+        "network": network,
+        "payer": from_addr,
+    }
+
+
 async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -> dict[str, Any]:
     """Sign EIP-3009 via Turnkey, settle via XPay (or self-settle), then disperse fee splits."""
     txn = await db.get(Transaction, txn_id)
@@ -657,6 +778,8 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
         raise ValueError("not your transaction")
     if txn.status == TransactionStatus.COMPLETED:
         return {"transaction_id": str(txn.id), "status": "completed", "reused": True, "meta": txn.meta}
+    if txn.status == TransactionStatus.SETTLED_PENDING_PAYOUT:
+        return await retry_payouts(db, txn_id=txn_id)
     if txn.status != TransactionStatus.PENDING:
         raise ValueError(f"transaction status is {txn.status}")
 
@@ -749,9 +872,17 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
     }
 
     settle_result = await facilitator_verify_and_settle(payment_payload, accept)
+    if settle_result.get("success"):
+        settle_result = await _confirm_settle_on_chain(
+            settle_result,
+            from_addr=from_addr,
+            to_addr=pay_to,
+            value_atomic=value_atomic,
+            network=network,
+        )
     if not settle_result.get("success"):
         logger.warning(
-            "XPay settle failed (%s) — attempting Turnkey self-settle",
+            "XPay settle failed/unconfirmed (%s) — attempting Turnkey self-settle",
             settle_result.get("errorReason"),
         )
         try:
@@ -783,8 +914,6 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
     }
 
     if settle_result.get("success"):
-        txn.status = TransactionStatus.COMPLETED
-        txn.completed_at = datetime.now(timezone.utc)
         txn.checkout_id = str(settle_result.get("transaction") or settle_result.get("txHash") or "")
         if txn.referral_usdc > 0 and txn.referrer_agent_id is not None:
             db.add(
@@ -804,7 +933,13 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
             logger.exception("payout disperse failed")
             payouts = {"success": False, "errorReason": str(exc)}
         txn.meta = {**(txn.meta or {}), "payouts": payouts}
-        status_out = "completed"
+        if payouts and payouts.get("success"):
+            txn.status = TransactionStatus.COMPLETED
+            txn.completed_at = datetime.now(timezone.utc)
+            status_out = "completed"
+        else:
+            txn.status = TransactionStatus.SETTLED_PENDING_PAYOUT
+            status_out = "settled_pending_payout"
     else:
         txn.status = TransactionStatus.FAILED
         status_out = "failed"

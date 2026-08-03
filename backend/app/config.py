@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     settlement_dry_run: bool = False  # skip on-chain when faucets unavailable
     # Max USDC per EIP-3009 auth (atomic units derived at policy apply time)
     wallet_spend_limit_usdc: str = "100.000000"
+    # Warn when platform treasury ETH (gas) is below this (ether units as string)
+    treasury_min_eth: str = "0.001"
 
     @field_validator("database_url", mode="before")
     @classmethod

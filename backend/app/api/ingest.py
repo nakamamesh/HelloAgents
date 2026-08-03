@@ -81,6 +81,22 @@ async def apply_wallet_policies() -> dict:
     return await wallet_svc.ensure_spend_policies()
 
 
+@router.get("/wallets/policies/audit")
+async def audit_wallet_policies() -> dict:
+    """Flag unrestricted SIGN_* ALLOW policies that can bypass HelloAgents guards."""
+    from app.services import wallets as wallet_svc
+
+    return await wallet_svc.audit_spend_policies()
+
+
+@router.get("/wallets/treasury")
+async def treasury_wallet_status() -> dict:
+    """Treasury ETH/USDC balances — alert when gas is low."""
+    from app.services import wallets as wallet_svc
+
+    return await wallet_svc.treasury_status()
+
+
 @router.post("/settlements/{txn_id}/retry-payouts")
 async def retry_settlement_payouts(
     txn_id: UUID,
