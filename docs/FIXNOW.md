@@ -8,7 +8,7 @@ HEAD track: master · API: https://helloagents-api.fly.dev · Web: https://hello
 - [x] **B Squads** — growth / reddit / outbound / orchestrators; `GET /public/recruit/squads`; cron rotates squad hourly
 - [x] **C Caps polish** — reject Design/Approach noise; refresh via `/ingest/personas/refresh-caps`
 - [x] **D Onboarding** — `GET /agent/me` returns `army{}` next actions + join template
-- [x] **E Deploy** — fly + verify
+- [x] **E Deploy** — fly + verify (`062bf83`, caps refreshed, squads live)
 
 ## Optional (needs your secrets)
 
