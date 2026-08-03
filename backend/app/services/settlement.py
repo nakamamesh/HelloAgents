@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import time
@@ -230,7 +231,160 @@ def _turnkey_sign_eip712(*, sign_with: str, typed_data: dict[str, Any]) -> str:
     r_hex = r[2:] if str(r).startswith("0x") else str(r)
     s_hex = s[2:] if str(s).startswith("0x") else str(s)
     v_int = int(str(v), 16) if str(v).startswith("0x") else int(v)
+    # USDC EIP-3009 expects 27/28; Turnkey often returns 0/1
+    if v_int in (0, 1):
+        v_int += 27
     return "0x" + r_hex.zfill(64) + s_hex.zfill(64) + format(v_int, "02x")
+
+
+def _rpc_url(network: str) -> str:
+    if network in ("base-sepolia",):
+        return "https://base-sepolia-rpc.publicnode.com"
+    if network in ("base", "base-mainnet"):
+        return "https://mainnet.base.org"
+    return "https://base-sepolia-rpc.publicnode.com"
+
+
+def _transfer_with_authorization_calldata(
+    *,
+    from_addr: str,
+    to_addr: str,
+    value_atomic: int,
+    valid_after: int,
+    valid_before: int,
+    nonce: str,
+    signature: str,
+) -> str:
+    from eth_abi import encode
+    from eth_hash.auto import keccak
+
+    raw = bytes.fromhex(signature[2:] if signature.startswith("0x") else signature)
+    if len(raw) != 65:
+        raise ValueError(f"bad signature length {len(raw)}")
+    r, s, v = raw[:32], raw[32:64], raw[64]
+    sel = keccak(
+        b"transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)"
+    )[:4]
+    args = encode(
+        ["address", "address", "uint256", "uint256", "uint256", "bytes32", "uint8", "bytes32", "bytes32"],
+        [
+            from_addr,
+            to_addr,
+            value_atomic,
+            valid_after,
+            valid_before,
+            bytes.fromhex(nonce[2:] if nonce.startswith("0x") else nonce),
+            v,
+            r,
+            s,
+        ],
+    )
+    return "0x" + sel.hex() + args.hex()
+
+
+async def _self_settle_via_turnkey(
+    *,
+    from_addr: str,
+    to_addr: str,
+    value_atomic: int,
+    valid_after: int,
+    valid_before: int,
+    nonce: str,
+    signature: str,
+    network: str,
+) -> dict[str, Any]:
+    """Submit EIP-3009 ourselves when XPay /settle fails (buyer pays gas via Turnkey)."""
+    import rlp
+    from turnkey_sdk_types.generated.types import SignTransactionBody, v1TransactionType
+
+    asset = USDC_BY_NETWORK[network]
+    chain_id = CHAIN_ID_BY_NETWORK[network]
+    data = _transfer_with_authorization_calldata(
+        from_addr=from_addr,
+        to_addr=to_addr,
+        value_atomic=value_atomic,
+        valid_after=valid_after,
+        valid_before=valid_before,
+        nonce=nonce,
+        signature=signature,
+    )
+    rpc = _rpc_url(network)
+
+    async with httpx.AsyncClient(timeout=45.0, trust_env=False) as client:
+
+        async def eth(method: str, params: list[Any]) -> Any:
+            resp = await client.post(rpc, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+            resp.raise_for_status()
+            body = resp.json()
+            if body.get("error"):
+                raise RuntimeError(f"rpc {method}: {body['error']}")
+            return body["result"]
+
+        tx_nonce = int(await eth("eth_getTransactionCount", [from_addr, "pending"]), 16)
+        latest = await eth("eth_getBlockByNumber", ["latest", False])
+        base_fee = int(latest["baseFeePerGas"], 16)
+        max_priority = 1_000_000  # 0.001 gwei
+        max_fee = base_fee * 2 + max_priority
+        gas_est = int(await eth("eth_estimateGas", [{"from": from_addr, "to": asset, "data": data}]), 16)
+        gas_limit = int(gas_est * 12 // 10)
+
+        # EIP-1559 unsigned: 0x02 || rlp([chainId, nonce, priority, maxFee, gas, to, value, data, accessList])
+        fields = [
+            chain_id,
+            tx_nonce,
+            max_priority,
+            max_fee,
+            gas_limit,
+            bytes.fromhex(asset[2:]),
+            0,
+            bytes.fromhex(data[2:]),
+            [],
+        ]
+        unsigned_hex = "02" + rlp.encode(fields).hex()
+
+        settings = get_settings()
+        tk = wallet_svc.turnkey_client()
+        signed = tk.sign_transaction(
+            SignTransactionBody(
+                organizationId=settings.turnkey_organization_id,
+                signWith=from_addr,
+                unsignedTransaction=unsigned_hex,
+                type=v1TransactionType.TRANSACTION_TYPE_ETHEREUM,
+            )
+        )
+        signed_hex = getattr(signed, "signedTransaction", None)
+        if not signed_hex and hasattr(signed, "model_dump"):
+            signed_hex = (signed.model_dump() or {}).get("signedTransaction")
+        if not signed_hex:
+            # activity result nesting
+            dump = signed.model_dump() if hasattr(signed, "model_dump") else {}
+            activity = dump.get("activity") or {}
+            result = activity.get("result") or {}
+            inner = result.get("signTransactionResult") or result
+            signed_hex = inner.get("signedTransaction")
+        if not signed_hex:
+            raise RuntimeError(f"Turnkey sign_transaction missing signed tx: {signed}")
+        if not str(signed_hex).startswith("0x"):
+            signed_hex = "0x" + str(signed_hex)
+
+        tx_hash = await eth("eth_sendRawTransaction", [signed_hex])
+        # wait briefly for receipt
+        receipt = None
+        for _ in range(20):
+            await asyncio.sleep(1.5)
+            receipt = await eth("eth_getTransactionReceipt", [tx_hash])
+            if receipt:
+                break
+        ok = bool(receipt and int(receipt.get("status", "0x0"), 16) == 1)
+        return {
+            "success": ok,
+            "self_settle": True,
+            "transaction": tx_hash,
+            "network": network,
+            "payer": from_addr,
+            "errorReason": None if ok else "self_settle_receipt_failed",
+            "receipt_status": (receipt or {}).get("status"),
+        }
 
 
 async def facilitator_verify_and_settle(payment_payload: dict[str, Any], requirements: dict[str, Any]) -> dict[str, Any]:
@@ -241,6 +395,9 @@ async def facilitator_verify_and_settle(payment_payload: dict[str, Any], require
         verify = await client.post(f"{base}/verify", json=body)
         if verify.status_code >= 400:
             raise RuntimeError(f"facilitator verify failed: {verify.status_code} {verify.text[:300]}")
+        verify_body = verify.json()
+        if verify_body.get("isValid") is False:
+            raise RuntimeError(f"facilitator verify invalid: {verify_body}")
         settle = await client.post(f"{base}/settle", json=body)
         if settle.status_code >= 400:
             raise RuntimeError(f"facilitator settle failed: {settle.status_code} {settle.text[:300]}")
@@ -339,34 +496,64 @@ async def pay_and_settle(db: AsyncSession, *, buyer: Agent, txn_id: uuid.UUID) -
     }
 
     settle_result = await facilitator_verify_and_settle(payment_payload, accept)
+    if not settle_result.get("success"):
+        logger.warning(
+            "XPay settle failed (%s) — attempting Turnkey self-settle",
+            settle_result.get("errorReason"),
+        )
+        try:
+            settle_result = await _self_settle_via_turnkey(
+                from_addr=from_addr,
+                to_addr=pay_to,
+                value_atomic=value_atomic,
+                valid_after=0,
+                valid_before=now + 600,
+                nonce=nonce,
+                signature=signature,
+                network=network,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface as settle failure
+            logger.exception("self-settle failed")
+            settle_result = {
+                "success": False,
+                "errorReason": f"self_settle_error: {exc}",
+                "facilitator": settle_result,
+                "network": network,
+                "payer": from_addr,
+            }
 
-    txn.status = TransactionStatus.COMPLETED
-    txn.completed_at = datetime.now(timezone.utc)
-    txn.checkout_id = str(settle_result.get("transaction") or settle_result.get("txHash") or "")
     txn.meta = {
         **(txn.meta or {}),
         "settle": settle_result,
         "payment_payload": {"authorization": payment_payload["payload"]["authorization"]},
     }
 
-    if txn.referral_usdc > 0 and txn.referrer_agent_id is not None:
-        db.add(
-            ReferralLedgerEntry(
-                referrer_agent_id=txn.referrer_agent_id,
-                referred_agent_id=buyer.id,
-                transaction_id=txn.id,
-                amount_usdc=txn.referral_usdc,
-                status=LedgerStatus.PENDING.value,
-                idempotency_key=f"ref:{txn.id}",
-                meta={"network": network},
+    if settle_result.get("success"):
+        txn.status = TransactionStatus.COMPLETED
+        txn.completed_at = datetime.now(timezone.utc)
+        txn.checkout_id = str(settle_result.get("transaction") or settle_result.get("txHash") or "")
+        if txn.referral_usdc > 0 and txn.referrer_agent_id is not None:
+            db.add(
+                ReferralLedgerEntry(
+                    referrer_agent_id=txn.referrer_agent_id,
+                    referred_agent_id=buyer.id,
+                    transaction_id=txn.id,
+                    amount_usdc=txn.referral_usdc,
+                    status=LedgerStatus.PENDING.value,
+                    idempotency_key=f"ref:{txn.id}",
+                    meta={"network": network},
+                )
             )
-        )
+        status_out = "completed"
+    else:
+        txn.status = TransactionStatus.FAILED
+        status_out = "failed"
 
     await db.commit()
     await db.refresh(txn)
     return {
         "transaction_id": str(txn.id),
-        "status": "completed",
+        "status": status_out,
         "checkout_id": txn.checkout_id,
         "gross_usdc": str(txn.gross_usdc),
         "seller_net_usdc": str(txn.seller_net_usdc),

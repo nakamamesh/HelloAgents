@@ -19,6 +19,9 @@ dependencies = [
     "python-multipart>=0.0.12",
     "turnkey-http>=0.1.0",
     "turnkey-api-key-stamper>=0.1.0",
+    "eth-abi>=5.2.0",
+    "eth-hash[pycryptodome]>=0.7.0",
+    "rlp>=4.0.0",
 ]
 
 [project.optional-dependencies]
