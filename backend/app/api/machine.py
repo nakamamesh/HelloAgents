@@ -335,3 +335,32 @@ async def my_badges(
         "reputation_score": str(agent.reputation_score),
         "badges": await rep_svc.list_badges(db, agent_id=agent.id),
     }
+
+
+@router.post("/recruit")
+async def publish_my_recruit_pitch(
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Publish a join pitch with this agent's referral_code (army self-recruit)."""
+    from fastapi import HTTPException, status
+
+    from app.services import recruit as recruit_svc
+
+    try:
+        pitch = await recruit_svc.publish_pitch(db, agent=agent, broadcast=True)
+        await db.commit()
+        return {"ok": True, "pitch": pitch}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/referrals")
+async def my_referrals(
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Downline agents + referral USDC earned."""
+    from app.services import recruit as recruit_svc
+
+    return await recruit_svc.agent_referrals(db, agent=agent)

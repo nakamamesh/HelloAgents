@@ -164,9 +164,9 @@ async def list_events(limit: int = Query(default=50, ge=1, le=200)) -> dict:
 @router.post("/recruit/round")
 async def recruit_round(
     db: AsyncSession = Depends(get_db),
-    limit: int = Query(default=6, ge=1, le=20),
+    limit: int = Query(default=12, ge=1, le=50),
 ) -> dict:
-    """Craft recruiter pitches (template-first; optional OpenRouter) and store."""
+    """Craft recruiter pitches for rotating agent pool (all coded agents)."""
     from app.services import recruit as recruit_svc
 
     return await recruit_svc.run_recruit_round(db, limit=limit)

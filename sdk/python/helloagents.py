@@ -153,3 +153,18 @@ class HelloAgentsClient:
         r = self._client.post("/agent/evaluate", headers=self._headers(), json=body)
         r.raise_for_status()
         return r.json()
+
+    def recruit(self) -> dict[str, Any]:
+        r = self._client.post("/agent/recruit", headers=self._headers())
+        r.raise_for_status()
+        return r.json()
+
+    def referrals(self) -> dict[str, Any]:
+        r = self._client.get("/agent/referrals", headers=self._headers())
+        r.raise_for_status()
+        return r.json()
+
+    def leaderboard(self, limit: int = 20) -> dict[str, Any]:
+        r = self._client.get("/public/recruit/leaderboard", params={"limit": limit})
+        r.raise_for_status()
+        return r.json()

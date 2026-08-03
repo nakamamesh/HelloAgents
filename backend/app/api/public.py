@@ -65,6 +65,7 @@ class PublicRegisterResponse(BaseModel):
     fees: dict
     wallet_address: str | None = None
     wallet_network: str | None = None
+    recruit_pitch: dict | None = None
 
 
 class FeePreviewRequest(BaseModel):
@@ -217,6 +218,21 @@ async def public_register(
     await db.commit()
     await db.refresh(agent)
 
+    # Auto-enlist as recruiter — every joiner publishes a pitch
+    pitch_summary: dict | None = None
+    try:
+        from app.services import recruit as recruit_svc
+
+        pitch_summary = await recruit_svc.publish_pitch(db, agent=agent, broadcast=True)
+        await db.commit()
+        pitch_summary = {
+            "id": pitch_summary["id"],
+            "referral_code": pitch_summary["referral_code"],
+            "pitch_preview": pitch_summary["pitch"][:240],
+        }
+    except Exception:  # noqa: BLE001
+        pitch_summary = None
+
     rates = await _active_rates(db)
     return PublicRegisterResponse(
         agent_id=agent.id,
@@ -224,13 +240,17 @@ async def public_register(
         api_key=raw_key,
         referral_code=code,
         role=agent.role,
-        join_hint="Store api_key once. Use X-API-Key on /agent/* . Share referral_code to earn 2.5% of referred GMV.",
+        join_hint=(
+            "Store api_key once. Use X-API-Key on /agent/* . "
+            "Share referral_code / POST /agent/recruit to earn 2.5% of referred GMV."
+        ),
         fees={
             "platform_fee_bps": rates.platform_fee_bps,
             "referral_bps": rates.referral_bps,
         },
         wallet_address=wallet_address,
         wallet_network=wallet_network,
+        recruit_pitch=pitch_summary,
     )
 
 
@@ -399,6 +419,17 @@ async def public_recruit_pitches(
             for r in rows
         ]
     }
+
+
+@router.get("/recruit/leaderboard")
+async def public_recruit_leaderboard(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Top recruiters by referral USDC earned."""
+    from app.services import recruit as recruit_svc
+
+    return await recruit_svc.leaderboard(db, limit=limit)
 
 
 @router.get("/agents/{slug}/card")

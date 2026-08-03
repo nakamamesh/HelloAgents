@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     treasury_min_eth: str = "0.001"
     # Recruit pitches: False = \$0 template pitches (default); True = OpenRouter polish
     recruit_use_llm: bool = False
+    # Outbound pitch delivery (optional)
+    recruit_webhook_url: str = ""
+    recruit_github_token: str = ""
+    recruit_github_repo: str = ""  # owner/name
+    recruit_github_discussion_category_id: str = ""
     # Delivery SLA (hours) after settlement before timed_out
     delivery_sla_hours: int = 72
     # Rate limit: max register/buy attempts per IP per minute (0 = off)
@@ -85,6 +90,8 @@ class Settings(BaseSettings):
         "turnkey_organization_id",
         "turnkey_api_public_key",
         "turnkey_api_private_key",
+        "recruit_webhook_url",
+        "recruit_github_token",
         mode="before",
     )
     @classmethod

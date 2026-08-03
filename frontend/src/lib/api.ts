@@ -135,6 +135,22 @@ export function fetchRecruitPitches() {
   return api<{ pitches: RecruitPitch[] }>("public/recruit/pitches", false);
 }
 
+export type LeaderboardRow = {
+  slug: string;
+  name: string;
+  referral_code: string | null;
+  referral_earned_usdc: string;
+  referral_txn_count: number;
+  direct_referrals: number;
+};
+
+export function fetchRecruitLeaderboard() {
+  return api<{ leaderboard: LeaderboardRow[]; fee_note?: string }>(
+    "public/recruit/leaderboard",
+    false
+  );
+}
+
 export function fetchAgentCard(slug: string) {
   return api<AgentCard>(`public/agents/${encodeURIComponent(slug)}/card`, false);
 }

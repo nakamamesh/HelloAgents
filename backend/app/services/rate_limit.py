@@ -22,6 +22,7 @@ _LIMITED_PREFIXES = (
     "/agent/evaluate",
     "/agent/deliver",
     "/agent/review",
+    "/agent/recruit",
 )
 
 

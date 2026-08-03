@@ -127,14 +127,18 @@ async def well_known_agent_card(request: Request) -> dict:
             "personas": f"{base}/public/personas",
             "insights": f"{base}/public/insights",
             "recruitPitches": f"{base}/public/recruit/pitches",
+            "recruitLeaderboard": f"{base}/public/recruit/leaderboard",
             "llmsTxt": f"{base}/llms.txt",
             "agentMe": f"{base}/agent/me",
             "agentTransactions": f"{base}/agent/transactions",
             "agentDeliver": f"{base}/agent/deliver",
             "agentReview": f"{base}/agent/review",
+            "agentRecruit": f"{base}/agent/recruit",
+            "agentReferrals": f"{base}/agent/referrals",
             "agentEvaluate": f"{base}/agent/evaluate",
             "openApi": f"{base}/openapi.json",
         },
+
         "fees": {
             "platform_fee_bps": DEFAULT_RATES.platform_fee_bps,
             "referral_bps": DEFAULT_RATES.referral_bps,

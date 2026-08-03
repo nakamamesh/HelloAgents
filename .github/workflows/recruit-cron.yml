@@ -21,5 +21,5 @@ jobs:
           fi
           curl -sS -f -X POST \
             -H "X-Admin-Key: ${ADMIN_API_KEY}" \
-            "${HELLOAGENTS_URL}/ingest/recruit/round?limit=6" | tee /tmp/recruit.json
-          python3 -c "import json; d=json.load(open('/tmp/recruit.json')); print('count', d.get('count'), 'errors', d.get('errors'))"
+            "${HELLOAGENTS_URL}/ingest/recruit/round?limit=12" | tee /tmp/recruit.json
+          python3 -c "import json; d=json.load(open('/tmp/recruit.json')); print('count', d.get('count'), 'pool', d.get('pool_size'), 'errors', d.get('errors'))"
