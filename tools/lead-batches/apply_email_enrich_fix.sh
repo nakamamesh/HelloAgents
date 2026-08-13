@@ -15,6 +15,11 @@ if [[ ! -f "$SRC" ]]; then
   echo "fetching enrich_websites.py from $RAW_BASE"
   curl -fsSL "$RAW_BASE/enrich_websites.py" -o "$SRC"
 fi
+SPEED_PY="$ROOT/speed_patch.py"
+if [[ ! -f "$SPEED_PY" ]]; then
+  SPEED_PY="$(mktemp /tmp/speed_patch.XXXXXX.py)"
+  curl -fsSL "$RAW_BASE/speed_patch.py" -o "$SPEED_PY"
+fi
 
 fix_batch() {
   local batch="$1"

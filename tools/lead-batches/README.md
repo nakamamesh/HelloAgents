@@ -24,9 +24,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/nakamamesh/HelloAgents/curso
 
 ## What it does
 1. Installs hardened `enrich_websites.py` into `~/.cursor/skills/{now,vmp}/scripts/`
-2. Sets `EMAIL_ENRICH_EVERY=5` in watchdog/statewide/plists
-3. Immediately background-enriches existing CSVs (no Docker; safe alongside Maps)
-4. Does **not** freeze empty emails — retries any website row with blank email
+2. Speed: `DEPTH=1` `STABLE_SEC=45` `TIMEOUT_SEC=480` `MAPS_YIELD_SEC=5` `EMAIL_ENRICH_EVERY=5`
+3. Reloads LaunchAgents and kicks statewide so new env applies (does **not** kill peer Maps containers)
+4. Immediately background-enriches existing CSVs (no Docker; safe alongside Maps)
+5. 15‑min enrich LaunchAgent
+6. Does **not** freeze empty emails
 
 ## Verify
 ```bash
