@@ -100,3 +100,52 @@ echo "Watch:"
 echo "  tail -f ~/.cursor/skills/now/data/enrich_console.log"
 echo "  python3 ~/.cursor/skills/now/scripts/status.py"
 echo "  python3 ~/.cursor/skills/vmp/scripts/status.py"
+
+
+# Hourly enrich keeper (fills emails while Maps scrapes places)
+install_hourly() {
+  local pl="$HOME_DIR/Library/LaunchAgents/com.helloagents.lead-enrich.plist"
+  mkdir -p "$HOME_DIR/Library/LaunchAgents"
+  cat >"$pl" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.helloagents.lead-enrich</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>$HOME_DIR/.cursor/skills/now/scripts/hourly_enrich.sh</string>
+  </array>
+  <key>StartInterval</key><integer>1800</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>$HOME_DIR/.cursor/skills/now/data/hourly_enrich.out.log</string>
+  <key>StandardErrorPath</key><string>$HOME_DIR/.cursor/skills/now/data/hourly_enrich.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>$HOME_DIR</string>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>
+PLIST
+  mkdir -p "$HOME_DIR/.cursor/skills/now/scripts" "$HOME_DIR/.cursor/skills/now/data"
+  cat >"$HOME_DIR/.cursor/skills/now/scripts/hourly_enrich.sh" <<'H'
+#!/usr/bin/env bash
+set -u
+for batch in now vmp; do
+  skill="$HOME/.cursor/skills/$batch"
+  csv="$HOME/HelloAgents/$batch/$batch.csv"
+  db="$skill/data/$batch.db"
+  [[ -f "$skill/scripts/enrich_websites.py" && -f "$csv" ]] || continue
+  python3 "$skill/scripts/enrich_websites.py" "$csv" "$csv" --workers 12 --db "$db" --batch "$batch" \
+    >>"$skill/data/enrich_console.log" 2>&1 || true
+done
+H
+  chmod +x "$HOME_DIR/.cursor/skills/now/scripts/hourly_enrich.sh"
+  launchctl bootout "gui/$(id -u)/com.helloagents.lead-enrich" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$pl" 2>/dev/null || launchctl load -w "$pl" 2>/dev/null || true
+  echo "installed hourly enrich LaunchAgent"
+}
+install_hourly
+

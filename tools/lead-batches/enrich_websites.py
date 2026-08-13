@@ -340,6 +340,19 @@ def ensure_table(conn: sqlite3.Connection, table: str) -> None:
     )
 
 
+def domain_key(url: str) -> str:
+    host = absolute_website(url)
+    if not host:
+        return ""
+    try:
+        h = urlparse(host).netloc.lower()
+    except Exception:
+        return ""
+    if h.startswith("www."):
+        h = h[4:]
+    return h
+
+
 def update_db(
     conn: sqlite3.Connection,
     table: str,
@@ -349,51 +362,50 @@ def update_db(
     email: str,
     contact: str,
 ) -> int:
+    """Fill blank emails only (never freeze). Match by domain, then company+state."""
     if not email and not contact:
         return 0
     cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
     if "email" not in cols:
         return 0
-    # Prefer matching website; never freeze blanks — fill empty emails only / upgrade contact
-    cur = conn.execute(
-        f"""
-        UPDATE {table}
-        SET email = CASE
-              WHEN IFNULL(email,'') = '' AND ? != '' THEN ?
-              WHEN IFNULL(email,'') != '' THEN email
-              ELSE email
-            END,
-            contact_person = COALESCE(NULLIF(contact_person,''), NULLIF(?, ''))
-        WHERE IFNULL(website,'') != ''
-          AND (
-            lower(replace(replace(website,'https://',''),'http://',''))
-              LIKE '%' || lower(?) || '%'
-            OR lower(company) = lower(?)
-          )
-          AND (IFNULL(state,'') = ? OR ? = '')
-        """,
-        (
-            email,
-            email,
-            contact,
-            re.sub(r"(?i)^https?://(www\.)?", "", website or "")[:80],
-            company,
-            state,
-            state,
-        ),
-    )
-    return cur.rowcount
+    dom = domain_key(website)
+    n = 0
+    if dom:
+        cur = conn.execute(
+            f"""
+            UPDATE {table}
+            SET email = CASE WHEN IFNULL(email,'')='' AND ?!='' THEN ? ELSE email END,
+                contact_person = COALESCE(NULLIF(contact_person,''), NULLIF(?,''))
+            WHERE IFNULL(email,'')=''
+              AND (
+                IFNULL(domain_key,'') = ?
+                OR lower(IFNULL(website,'')) LIKE '%' || ? || '%'
+              )
+              AND (IFNULL(state,'') = ? OR ? = '')
+            """,
+            (email, email, contact, dom, dom, state, state),
+        )
+        n += cur.rowcount
+    if n == 0 and company:
+        cur = conn.execute(
+            f"""
+            UPDATE {table}
+            SET email = CASE WHEN IFNULL(email,'')='' AND ?!='' THEN ? ELSE email END,
+                contact_person = COALESCE(NULLIF(contact_person,''), NULLIF(?,''))
+            WHERE IFNULL(email,'')=''
+              AND lower(IFNULL(company,'')) = lower(?)
+              AND (IFNULL(state,'') = ? OR ? = '')
+            """,
+            (email, email, contact, company, state, state),
+        )
+        n += cur.rowcount
+    return n
 
 
-def export_from_db(conn: sqlite3.Connection, table: str, out_csv: Path, state_csv: dict[str, str]) -> None:
-    rows = conn.execute(
-        f"SELECT {', '.join(FIELDS)} FROM {table} ORDER BY state, county, company"
-    ).fetchall()
-    dicts = [dict(zip(FIELDS, r)) for r in rows]
-    write_csv(out_csv, dicts)
+def write_state_csvs(out_csv: Path, rows: list[dict], state_csv: dict[str, str]) -> None:
     out_dir = out_csv.parent
     by_state: dict[str, list[dict]] = {}
-    for d in dicts:
+    for d in rows:
         st = (d.get("state") or "").upper()
         by_state.setdefault(st, []).append(d)
     for st, name in state_csv.items():
@@ -466,6 +478,20 @@ def main() -> int:
             print(f"missing csv {args.infile}", flush=True)
             return 1
         rows = load_rows(args.infile)
+
+        # Prefer DB backlog when present (status.py reads DB)
+        db.parent.mkdir(parents=True, exist_ok=True)
+        conn_pre = sqlite3.connect(str(db))
+        ensure_table(conn_pre, table)
+        db_count = conn_pre.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        if db_count > 0:
+            db_rows = conn_pre.execute(
+                f"SELECT {', '.join(FIELDS)} FROM {table} ORDER BY state, county, company"
+            ).fetchall()
+            rows = [dict(zip(FIELDS, r)) for r in db_rows]
+            print(f"loaded {len(rows)} rows from db {db}", flush=True)
+        conn_pre.close()
+
         # NEVER freeze: any row with website and empty email is fair game
         todo_idx = [
             i
@@ -517,7 +543,9 @@ def main() -> int:
                         flush=True,
                     )
 
+        # CSV from memory is source of truth — never overwrite with empty DB export
         write_csv(args.outfile, rows)
+        write_state_csvs(args.outfile, rows, state_csv)
 
         db.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(db))
@@ -536,10 +564,15 @@ def main() -> int:
                 r.get("contact_person") or "",
             )
         conn.commit()
-        export_from_db(conn, table, args.outfile, state_csv)
+        db_n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        db_email = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE IFNULL(email,'')!=''"
+        ).fetchone()[0]
         conn.close()
+        csv_email = sum(1 for r in rows if (r.get("email") or "").strip())
         print(
-            f"done emails_new≈{got} db_updates≈{updated} csv={args.outfile}",
+            f"done emails_new≈{got} csv_email={csv_email} "
+            f"db_updates≈{updated} db_rows={db_n} db_email={db_email} csv={args.outfile}",
             flush=True,
         )
         return 0
