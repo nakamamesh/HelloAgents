@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Apply email-enrich fix for NOW + VMP on the Mac (skills under ~/.cursor/skills).
+# Safe while Maps scrapers run — enrich is separate from Docker.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+SRC="$ROOT/enrich_websites.py"
+HOME_DIR="${HOME:-/Users/$(id -un)}"
+
+if [[ ! -f "$SRC" ]]; then
+  echo "missing $SRC" >&2
+  exit 1
+fi
+
+fix_batch() {
+  local batch="$1"
+  local skill="$HOME_DIR/.cursor/skills/$batch"
+  local csv="$HOME_DIR/HelloAgents/$batch/$batch.csv"
+  local db="$skill/data/$batch.db"
+  local env_prefix
+  env_prefix="$(echo "$batch" | tr '[:lower:]' '[:upper:]')"
+
+  if [[ ! -d "$skill/scripts" ]]; then
+    echo "SKIP $batch — no skill at $skill"
+    return 0
+  fi
+
+  mkdir -p "$skill/data" "$HOME_DIR/HelloAgents/$batch"
+  cp "$skill/scripts/enrich_websites.py" "$skill/scripts/enrich_websites.py.bak.$(date +%s)" 2>/dev/null || true
+  cp "$SRC" "$skill/scripts/enrich_websites.py"
+  chmod +x "$skill/scripts/enrich_websites.py"
+
+  # Patch cadence: enrich every 5 places (was 25 → never fired)
+  for f in "$skill/scripts/run_statewide.py" "$skill/scripts/watchdog.sh" "$skill/scripts/keeper.sh"; do
+    [[ -f "$f" ]] || continue
+    perl -i -pe 's/EMAIL_ENRICH_EVERY", "25"/EMAIL_ENRICH_EVERY", "5"/g; s/EMAIL_ENRICH_EVERY:-25/EMAIL_ENRICH_EVERY:-5/g; s/EMAIL_ENRICH_EVERY=25/EMAIL_ENRICH_EVERY=5/g' "$f" || true
+  done
+
+  # LaunchAgent plists
+  for pl in \
+    "$HOME_DIR/Library/LaunchAgents/com.helloagents.${batch}.watchdog.plist" \
+    "$HOME_DIR/Library/LaunchAgents/com.helloagents.${batch}.keeper.plist"; do
+    [[ -f "$pl" ]] || continue
+    perl -i -pe 's#<string>25</string>#<string>5</string># if $. && $prev_enrich; $prev_enrich = (/EMAIL_ENRICH_EVERY/ ? 1 : 0)' "$pl" 2>/dev/null || true
+    # simpler replace of key block via python
+    python3 - <<PY
+from pathlib import Path
+p = Path("$pl")
+t = p.read_text()
+import re
+t2 = re.sub(
+    r'(<key>EMAIL_ENRICH_EVERY</key>\s*<string>)\d+(</string>)',
+    r'\g<1>5\g<2>',
+    t,
+)
+if t2 != t:
+    p.write_text(t2)
+    print("patched plist", p)
+else:
+    # insert env if missing
+    if "EMAIL_ENRICH_EVERY" not in t and "<key>EnvironmentVariables</key>" in t:
+        t = t.replace(
+            "<key>EnvironmentVariables</key>\n\t<dict>\n",
+            "<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>EMAIL_ENRICH_EVERY</key>\n\t\t<string>5</string>\n",
+        )
+        p.write_text(t)
+        print("inserted EMAIL_ENRICH_EVERY in", p)
+PY
+  done
+
+  # Verify no crm table leftovers in enrich
+  if grep -E 'table_info\(crm\)|FROM crm|UPDATE crm|CREATE TABLE IF NOT EXISTS crm' "$skill/scripts/enrich_websites.py" >/dev/null 2>&1; then
+    echo "WARN: enrich still mentions crm table — forcing batch=$batch rewrite" >&2
+  fi
+
+  if [[ ! -f "$csv" ]]; then
+    echo "No CSV yet at $csv — enrich will run when data exists"
+    return 0
+  fi
+
+  echo "=== enrich $batch NOW (websites→emails) ==="
+  export LEAD_BATCH="$batch"
+  export "${env_prefix}_DB=$db"
+  export "${env_prefix}_CSV=$csv"
+  nohup python3 "$skill/scripts/enrich_websites.py" "$csv" "$csv" \
+    --workers 12 --db "$db" --batch "$batch" \
+    >>"$skill/data/enrich_console.log" 2>&1 &
+  echo "spawned enrich pid=$! log=$skill/data/enrich_console.log"
+}
+
+fix_batch now
+fix_batch vmp
+
+echo
+echo "Watch:"
+echo "  tail -f ~/.cursor/skills/now/data/enrich_console.log"
+echo "  python3 ~/.cursor/skills/now/scripts/status.py"
+echo "  python3 ~/.cursor/skills/vmp/scripts/status.py"
