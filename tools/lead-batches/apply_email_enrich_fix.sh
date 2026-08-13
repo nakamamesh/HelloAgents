@@ -6,10 +6,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC="$ROOT/enrich_websites.py"
 HOME_DIR="${HOME:-/Users/$(id -un)}"
+RAW_BASE="${LEAD_BATCH_RAW_BASE:-https://raw.githubusercontent.com/nakamamesh/HelloAgents/cursor/fix-vmp-now-email-enrich-54c9/tools/lead-batches}"
 
 if [[ ! -f "$SRC" ]]; then
-  echo "missing $SRC" >&2
-  exit 1
+  # curl|bash or tempfile: fetch enrich next to this script or into /tmp
+  TMPDIR_ENRICH="$(mktemp -d)"
+  SRC="$TMPDIR_ENRICH/enrich_websites.py"
+  echo "fetching enrich_websites.py from $RAW_BASE"
+  curl -fsSL "$RAW_BASE/enrich_websites.py" -o "$SRC"
 fi
 
 fix_batch() {
